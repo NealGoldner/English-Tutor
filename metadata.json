@@ -1,0 +1,8 @@
+{
+  "name": "English Tutor",
+  "description": "An immersive AI-powered English conversation practice app using Gemini Live API for real-time voice interaction, translation, and visual learning.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
