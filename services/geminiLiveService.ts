@@ -46,12 +46,26 @@ async function decodeAudioData(
   return buffer;
 }
 
+/**
+ * 带有噪声抑制效果的 PCM 转换
+ */
 function createBlob(data: Float32Array): Blob {
   const l = data.length;
   const int16 = new Int16Array(l);
+  
+  // 噪声门限：如果最大振幅非常小，则视为静音
+  let maxAmplitude = 0;
   for (let i = 0; i < l; i++) {
-    int16[i] = data[i] * 32768;
+    maxAmplitude = Math.max(maxAmplitude, Math.abs(data[i]));
   }
+  
+  const isSilence = maxAmplitude < 0.008; // 极其微弱的声音会被判定为静音
+
+  for (let i = 0; i < l; i++) {
+    // 如果被判定为静音，则发送纯静音数据以保持流的连贯性
+    int16[i] = isSilence ? 0 : data[i] * 32768;
+  }
+  
   return {
     data: encode(new Uint8Array(int16.buffer)),
     mimeType: 'audio/pcm;rate=16000',
@@ -91,7 +105,16 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     });
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // 强化麦克风流约束：开启硬件降噪和回声消除
+  const stream = await navigator.mediaDevices.getUserMedia({ 
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+      sampleRate: 16000
+    } 
+  });
   
   const systemInstruction = `
     你是一位专业的双语英语导师 FluentGenie。
@@ -107,9 +130,10 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     - 详细解释为什么那是错的，并提供 2-3 种更地道的表达方式。
     - 针对发音问题，用文字描述纠音要点（如：注意 L 和 R 的区别）。
     ` : "保持对话流畅，只有在严重影响理解时才进行纠错。"}
-    3. 如果用户说中文，将其翻译成英文并引导用户模仿跟读。
-    4. 视觉交互：收到照片时，用英文和中文描述内容，并以此展开教学。
-    5. 回复要简练，适合语音交流。
+    3. 环境适应：如果你在音频中听到背景杂音，请忽略它们，只关注并响应最响亮的、清晰的用户人声。
+    4. 如果用户说中文，将其翻译成英文并引导用户模仿跟读。
+    5. 视觉交互：收到照片时，用英文和中文描述内容，并以此展开教学。
+    6. 回复要简练，适合语音交流。
   `;
 
   const sessionPromise = ai.live.connect({

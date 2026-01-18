@@ -6,11 +6,25 @@ export enum AppStatus {
   ERROR = 'ERROR'
 }
 
+export enum MainMode {
+  PRACTICE = 'PRACTICE',
+  DICTIONARY = 'DICTIONARY',
+  HISTORY = 'HISTORY'
+}
+
 export interface TranscriptionEntry {
   id: string;
   role: 'user' | 'model';
   text: string;
   timestamp: number;
+}
+
+export interface SessionHistory {
+  id: string;
+  title: string;
+  date: string;
+  topic: string;
+  entries: TranscriptionEntry[];
 }
 
 export interface TutorConfig {
@@ -19,6 +33,7 @@ export interface TutorConfig {
   voice: 'Zephyr' | 'Puck' | 'Charon' | 'Kore' | 'Fenrir';
   isTranslationMode: boolean;
   isCorrectionMode: boolean;
+  showTranscription: boolean; // 新增：是否显示文字
 }
 
 export const TUTOR_TOPICS = [
