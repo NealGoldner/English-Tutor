@@ -1,12 +1,17 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-const ai = new GoogleGenAI({ 
-  apiKey: process.env.API_KEY as string,
-  baseUrl: `${window.location.origin}/api`
-});
+const getAI = () => {
+  const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
+  const aiConfig: any = { apiKey: process.env.API_KEY as string };
+  if (!isPreview) {
+    aiConfig.baseUrl = `${window.location.origin}/api`;
+  }
+  return new GoogleGenAI(aiConfig);
+};
 
 export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
+  const ai = getAI();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
@@ -23,8 +28,6 @@ export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (base64Audio) {
-      const audioSrc = `data:audio/pcm;base64,${base64Audio}`;
-      // 这里使用简化的 Web Audio 处理
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const buffer = await decodeAudioData(decodeBase64(base64Audio), ctx);
       const source = ctx.createBufferSource();
@@ -34,7 +37,6 @@ export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
     }
   } catch (err) {
     console.error("TTS Error:", err);
-    // 降级使用浏览器自带 TTS
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
     window.speechSynthesis.speak(utterance);

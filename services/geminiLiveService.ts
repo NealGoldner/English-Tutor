@@ -64,20 +64,15 @@ interface StartSessionOptions {
   onError: (error: any) => void;
 }
 
-export const sendImageFrame = async (base64Data: string) => {
-  if (currentSession) {
-    currentSession.sendRealtimeInput({
-      media: { data: base64Data, mimeType: 'image/jpeg' }
-    });
-  }
-};
-
 export const startLiveSession = async ({ config, onTranscription, onClose, onError }: StartSessionOptions) => {
-  const proxyBaseUrl = `${window.location.origin}/api`;
-  const ai = new GoogleGenAI({ 
-    apiKey: process.env.API_KEY as string,
-    baseUrl: proxyBaseUrl 
-  });
+  // 环境检测：如果是 preview 或 localhost，不使用代理
+  const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
+  const aiConfig: any = { apiKey: process.env.API_KEY as string };
+  if (!isPreview) {
+    aiConfig.baseUrl = `${window.location.origin}/api`;
+  }
+
+  const ai = new GoogleGenAI(aiConfig);
   
   inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
   outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -161,6 +156,15 @@ export const stopLiveSession = () => {
   if (currentSession) {
     if (inputAudioContext) inputAudioContext.close();
     if (outputAudioContext) outputAudioContext.close();
+    currentSession.close();
     currentSession = null;
+  }
+};
+
+export const sendImageFrame = async (base64Data: string) => {
+  if (currentSession) {
+    currentSession.sendRealtimeInput({
+      media: { data: base64Data, mimeType: 'image/jpeg' }
+    });
   }
 };

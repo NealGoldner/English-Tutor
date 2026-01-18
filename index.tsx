@@ -4,16 +4,17 @@ import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 
 const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
+if (rootElement) {
+  // 移除加载动画节点（如果有）
+  const loader = document.getElementById('loading-status');
+  if (loader) loader.style.display = 'none';
+
+  const root = ReactDOM.createRoot(rootElement);
+  root.render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+  
+  (window as any).APP_LOADED = true;
 }
-
-// 标记 React 已经开始运行
-(window as any).APP_LOADED = true;
-
-const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
