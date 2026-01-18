@@ -52,11 +52,10 @@
     <script>
         window.APP_LOADED = false;
         
-        // 网络诊断工具
         const checkResource = async (url) => {
             try {
                 const start = Date.now();
-                const res = await fetch(url, { mode: 'no-cors', cache: 'no-cache' });
+                await fetch(url, { mode: 'no-cors', cache: 'no-cache' });
                 return { ok: true, time: Date.now() - start };
             } catch (e) {
                 return { ok: false };
@@ -93,35 +92,42 @@
             if (failCount > 0) {
                 alert(report + "\n建议措施：\n1. 尝试切换手机流量/Wi-Fi\n2. 检查浏览器是否开启了过度严格的广告过滤\n3. 检查您的设备时间是否正确。");
             } else {
-                alert(report + "\n资源连接正常，但应用仍无法启动。请尝试清理浏览器缓存后重试。");
+                alert(report + "\n资源连接正常，但应用仍无法启动。可能是因为您的浏览器版本过低不支持 ES 模块。");
             }
         }
 
         function showError(msg) {
             const overlay = document.getElementById('error-overlay');
             const errorMsg = document.getElementById('error-message');
-            if (overlay) {
+            if (overlay && errorMsg) {
                 overlay.style.display = 'flex';
                 errorMsg.innerText = msg;
+                const debugHost = document.getElementById('debug-host');
+                if (debugHost) debugHost.innerText = window.location.protocol + "//" + window.location.hostname;
             }
         }
 
         window.addEventListener('error', (event) => {
             if (event.target.tagName === 'SCRIPT' || event.message?.includes('import')) {
-                showError('核心脚本加载被网络拦截。请尝试切换网络环境（如从Wi-Fi切至流量）。');
+                showError('脚本加载失败。请检查网络环境或尝试刷新页面。');
             }
         }, true);
 
         window.addEventListener('DOMContentLoaded', () => {
-            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+            // 放宽环境检查：本地调试、Google AI Studio、Cloudflare Pages 均视为受信任
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const isTrustedHost = window.location.hostname.includes('google.com') || window.location.hostname.includes('pages.dev');
+            const isHttps = window.location.protocol === 'https:';
+
+            if (!isHttps && !isLocal && !isTrustedHost) {
                 showError('为了启用麦克风和隐私保护，请确保使用 HTTPS 链接访问应用。');
                 return;
             }
 
-            // 加载超时监控延长至15秒
+            // 加载超时监控
             setTimeout(() => {
                 if (!window.APP_LOADED) {
-                    showError('连接超时。当前网络可能无法顺畅加载本应用的云端核心组件。');
+                    showError('连接超时。请尝试切换到更稳定的 Wi-Fi 网络或使用流量重试。');
                 }
             }, 15000);
         });
@@ -149,7 +155,6 @@
         </div>
     </div>
 
-    <!-- 增强版错误诊断层 -->
     <div id="error-overlay">
         <div class="error-card flex flex-col items-center">
             <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6">
@@ -162,10 +167,9 @@
             <div class="flex flex-col gap-3 w-full">
                 <button onclick="window.location.reload()" class="w-full py-4 bg-[#6B8E6B] text-white rounded-2xl font-bold shadow-lg active:scale-95 transition-transform">重试连接</button>
                 <button id="diag-btn" onclick="runDiagnostic()" class="w-full py-3 bg-white border border-[#E8E2D6] text-[#8BA888] rounded-2xl font-bold text-xs">一键诊断网络问题</button>
-                <p class="text-[10px] text-stone-400 mt-2">当前域名: <span id="debug-host"></span></p>
+                <p class="text-[10px] text-stone-400 mt-2">调试环境: <span id="debug-host"></span></p>
             </div>
         </div>
-        <script>document.getElementById('debug-host').innerText = window.location.hostname;</script>
     </div>
 </body>
 </html>

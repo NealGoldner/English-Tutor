@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry, SessionHistory } from '../types';
+import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry, SessionHistory } from '../types.ts';
 
 interface ControlPanelProps {
   status: AppStatus;
@@ -43,7 +43,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         {!isActive && (
           <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Topic Selector */}
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold text-[#8BA888] uppercase tracking-[0.2em] ml-1">练习话题</label>
                 <select 
@@ -58,7 +57,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </select>
               </div>
 
-              {/* Difficulty */}
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold text-[#8BA888] uppercase tracking-[0.2em] ml-1">语言等级</label>
                 <div className="flex bg-white border border-[#E8E2D6] rounded-2xl p-1 shadow-sm">
@@ -114,7 +112,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
                 结束本次课程
               </span>
-              <span className="text-[10px] opacity-70 font-medium tracking-widest">完成后可保存笔记复盘</span>
             </button>
           ) : (
             <>
@@ -137,25 +134,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
                             <path d="M8.25 4.5a3.75 3.75 0 1 1 7.5 0v8.25a3.75 3.75 0 1 1-7.5 0V4.5Z" />
-                            <path d="M6 10.5a.75.75 0 0 1 .75.75v1.5a5.25 5.25 0 1 0 10.5 0v-1.5a.75.75 0 0 1 1.5 0v1.5a6.75 6.75 0 0 1-6 6.709v2.291h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1 0-1.5h3v-2.291a6.75 6.75 0 0 1-6-6.709v-1.5A.75.75 0 0 1 6 10.5Z" />
                         </svg>
                     </div>
                     <span className="text-xl">开始对话</span>
                   </>
                 )}
               </button>
-              {!isActive && transcriptions.length > 0 && (
-                <button 
-                  onClick={handleSaveSession}
-                  className="bg-[#C48B4D] hover:bg-[#A67540] text-white w-20 py-7 rounded-[2rem] shadow-xl shadow-[#C48B4D]/20 transition-all flex items-center justify-center active:scale-90"
-                  title="保存笔记"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8">
-                    <path d="M7.5 3.375c0-1.036.84-1.875 1.875-1.875h.375a3.75 3.75 0 0 1 3.75 3.75v1.875C13.5 8.161 14.34 9 15.375 9h1.875A3.75 3.75 0 0 1 21 12.75v3.375C21 17.16 20.16 18 19.125 18h-9.75A1.875 1.875 0 0 1 7.5 16.125V3.375Z" />
-                    <path d="M6.75 5.25a.75.75 0 0 0-1.5 0v10.125c0 .621.504 1.125 1.125 1.125h10.125a.75.75 0 0 0 0-1.5H6.75V5.25Z" />
-                  </svg>
-                </button>
-              )}
             </>
           )}
         </div>

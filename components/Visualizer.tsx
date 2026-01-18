@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
-import { AppStatus } from '../types';
+import { AppStatus } from '../types.ts';
 
 interface VisualizerProps {
   status: AppStatus;

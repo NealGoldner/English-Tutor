@@ -1,14 +1,14 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { AppStatus, TranscriptionEntry, TutorConfig, MainMode } from './types';
-import Header from './components/Header';
-import ControlPanel from './components/ControlPanel';
-import TranscriptionView from './components/TranscriptionView';
-import Visualizer from './components/Visualizer';
-import CameraOverlay from './components/CameraOverlay';
-import DictionarySection from './components/DictionarySection';
-import HistorySection from './components/HistorySection';
-import { startLiveSession, stopLiveSession, sendImageFrame } from './services/geminiLiveService';
+import { AppStatus, TranscriptionEntry, TutorConfig, MainMode } from './types.ts';
+import Header from './components/Header.tsx';
+import ControlPanel from './components/ControlPanel.tsx';
+import TranscriptionView from './components/TranscriptionView.tsx';
+import Visualizer from './components/Visualizer.tsx';
+import CameraOverlay from './components/CameraOverlay.tsx';
+import DictionarySection from './components/DictionarySection.tsx';
+import HistorySection from './components/HistorySection.tsx';
+import { startLiveSession, stopLiveSession, sendImageFrame } from './services/geminiLiveService.ts';
 
 const App: React.FC = () => {
   const [activeMode, setActiveMode] = useState<MainMode>(MainMode.PRACTICE);
@@ -29,7 +29,6 @@ const App: React.FC = () => {
     output: AudioContext | null;
   }>({ input: null, output: null });
 
-  // 手机端手势交互优化
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -38,9 +37,7 @@ const App: React.FC = () => {
       }
     };
     
-    // 防止手机浏览器回弹效果干扰练习
     document.body.style.overscrollBehavior = 'none';
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
@@ -96,7 +93,6 @@ const App: React.FC = () => {
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-4 max-w-4xl flex flex-col gap-5 overflow-hidden">
-        {/* 移动端优化导航 */}
         <div className="flex bg-white/60 p-1.5 rounded-2xl border border-[#E8E2D6] self-center w-full max-w-sm shadow-sm">
            <button 
             onClick={() => setActiveMode(MainMode.PRACTICE)}
@@ -120,7 +116,6 @@ const App: React.FC = () => {
 
         {activeMode === MainMode.PRACTICE ? (
           <>
-            {/* 核心可视化区域 */}
             <div className="bg-[#FFFFFF]/80 backdrop-blur-sm rounded-[2.5rem] shadow-sm border border-[#E8E2D6] p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700">
               <div className="absolute top-0 left-0 w-60 h-60 bg-[#6B8E6B]/5 rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl"></div>
               
@@ -134,9 +129,6 @@ const App: React.FC = () => {
                   <span className="flex items-center gap-1.5 px-3 py-1 bg-[#6B8E6B]/10 rounded-full text-[9px] font-bold text-[#6B8E6B] border border-[#6B8E6B]/20 uppercase tracking-tight">
                     <div className="w-1.5 h-1.5 bg-[#6B8E6B] rounded-full animate-pulse"></div>
                     人声增强模式
-                  </span>
-                  <span className="px-3 py-1 bg-[#8BA888]/10 rounded-full text-[9px] font-bold text-[#8BA888] border border-[#8BA888]/20 uppercase tracking-tight">
-                    全量代理加密
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-[#4A5D4A]">
@@ -165,17 +157,12 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* 记录区域 */}
             <div className="flex-1 flex flex-col min-h-0 bg-white/40 rounded-[2rem] border border-[#E8E2D6] overflow-hidden shadow-sm">
               <div className="p-4 border-b border-[#E8E2D6] bg-white/50 flex items-center justify-between">
                 <h3 className="font-bold text-[#4A5D4A] flex items-center gap-2 text-sm">
                   <span className="w-1.5 h-1.5 bg-[#6B8E6B] rounded-full"></span>
                   即时反馈
                 </h3>
-                <div className="flex items-center gap-1.5">
-                  {!config.showTranscription && <span className="text-[9px] font-bold px-2 py-0.5 bg-[#6B8E6B]/10 text-[#6B8E6B] rounded-full">听力挑战</span>}
-                  <span className="text-[9px] font-bold text-[#8BA888] uppercase tracking-widest border border-[#E8E2D6] px-2 py-0.5 rounded-full">Proxy Native</span>
-                </div>
               </div>
               <TranscriptionView 
                 entries={transcriptions} 
