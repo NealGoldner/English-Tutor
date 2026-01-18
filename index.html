@@ -4,15 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>FluentGenie - AI 护眼英语练习</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>FluentGenie - AI 英语练习</title>
+    <!-- 使用 fastly 节点提高移动端稳定性 -->
+    <script src="https://fastly.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.js"></script>
     <style>
+        /* 移除谷歌字体，使用系统高性能字体族，防止阻塞 */
         body { 
-          font-family: 'Inter', sans-serif; 
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
           background-color: #F9F7F2;
           -webkit-tap-highlight-color: transparent;
           overflow-x: hidden;
+          color: #2D3748;
         }
         #root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 
@@ -30,9 +32,9 @@
         }
 
         .loading-pulse {
-            width: 48px;
-            height: 48px;
-            border: 4px solid #6B8E6B20;
+            width: 40px;
+            height: 40px;
+            border: 3px solid #6B8E6B20;
             border-top-color: #6B8E6B;
             border-radius: 50%;
             animation: spin 1s linear infinite;
@@ -42,10 +44,10 @@
         .error-card {
             background: white;
             padding: 2rem;
-            border-radius: 2.5rem;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.05);
+            border-radius: 2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
             max-width: 90%;
-            width: 400px;
+            width: 380px;
         }
     </style>
     
@@ -55,7 +57,11 @@
         const checkResource = async (url) => {
             try {
                 const start = Date.now();
-                await fetch(url, { mode: 'no-cors', cache: 'no-cache' });
+                // 使用 no-cors 尝试探测，但 fetch 在部分移动浏览器下对 blocked 资源会直接 throw
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), 5000);
+                await fetch(url, { mode: 'no-cors', cache: 'no-cache', signal: controller.signal });
+                clearTimeout(id);
                 return { ok: true, time: Date.now() - start };
             } catch (e) {
                 return { ok: false };
@@ -64,35 +70,33 @@
 
         async function runDiagnostic() {
             const btn = document.getElementById('diag-btn');
-            const originalText = btn.innerText;
-            btn.innerText = "诊断中...";
+            btn.innerText = "正在检测网络...";
             btn.disabled = true;
 
             const results = {
-                'React核心库': await checkResource('https://cdn.jsdelivr.net/npm/react@19.0.0/+esm'),
-                'GenAI SDK': await checkResource('https://esm.sh/@google/genai@1.37.0'),
-                'Tailwind样式': await checkResource('https://cdn.tailwindcss.com'),
-                '谷歌字体库': await checkResource('https://fonts.googleapis.com')
+                '核心库镜像': await checkResource('https://fastly.jsdelivr.net/npm/react@19.0.0/+esm'),
+                'GenAI 节点': await checkResource('https://esm.run/@google/genai@1.37.0'),
+                'CSS 样式节点': await checkResource('https://fastly.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.js')
             };
 
-            let report = "【网络连通性诊断】\n\n";
+            let report = "【网络详细诊断】\n\n";
             let failCount = 0;
             for (const [name, res] of Object.entries(results)) {
                 if (res.ok) {
-                    report += `✅ ${name}: 连通正常 (${res.time}ms)\n`;
+                    report += `✅ ${name}: 正常 (${res.time}ms)\n`;
                 } else {
-                    report += `❌ ${name}: 连接失败 (请检查网络阻断)\n`;
+                    report += `❌ ${name}: 无法连接\n`;
                     failCount++;
                 }
             }
 
-            btn.innerText = originalText;
+            btn.innerText = "重新诊断";
             btn.disabled = false;
 
             if (failCount > 0) {
-                alert(report + "\n建议措施：\n1. 尝试切换手机流量/Wi-Fi\n2. 检查浏览器是否开启了过度严格的广告过滤\n3. 检查您的设备时间是否正确。");
+                alert(report + "\n原因：您的网络环境阻断了必要的云端库文件。\n\n建议：\n1. 请务必开启代理/加速器并选择“全局模式”。\n2. 尝试连接不同的 Wi-Fi。");
             } else {
-                alert(report + "\n资源连接正常，但应用仍无法启动。可能是因为您的浏览器版本过低不支持 ES 模块。");
+                alert(report + "\n网络正常，请点击下方“刷新应用”。");
             }
         }
 
@@ -102,72 +106,57 @@
             if (overlay && errorMsg) {
                 overlay.style.display = 'flex';
                 errorMsg.innerText = msg;
-                const debugHost = document.getElementById('debug-host');
-                if (debugHost) debugHost.innerText = window.location.protocol + "//" + window.location.hostname;
             }
         }
 
         window.addEventListener('error', (event) => {
             if (event.target.tagName === 'SCRIPT' || event.message?.includes('import')) {
-                showError('脚本加载失败。请检查网络环境或尝试刷新页面。');
+                showError('资源加载被拦截，请确保已开启网络加速。');
             }
         }, true);
 
         window.addEventListener('DOMContentLoaded', () => {
-            // 放宽环境检查：本地调试、Google AI Studio、Cloudflare Pages 均视为受信任
-            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-            const isTrustedHost = window.location.hostname.includes('google.com') || window.location.hostname.includes('pages.dev');
-            const isHttps = window.location.protocol === 'https:';
-
-            if (!isHttps && !isLocal && !isTrustedHost) {
-                showError('为了启用麦克风和隐私保护，请确保使用 HTTPS 链接访问应用。');
-                return;
-            }
-
-            // 加载超时监控
             setTimeout(() => {
                 if (!window.APP_LOADED) {
-                    showError('连接超时。请尝试切换到更稳定的 Wi-Fi 网络或使用流量重试。');
+                    showError('响应超时。请尝试切换网络环境或开启加速工具。');
                 }
-            }, 15000);
+            }, 10000); // 缩短等待时间，快速报错
         });
     </script>
 
 <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
-    "react/": "https://cdn.jsdelivr.net/npm/react@19.0.0/",
-    "react": "https://cdn.jsdelivr.net/npm/react@19.0.0/+esm",
-    "react-dom/": "https://cdn.jsdelivr.net/npm/react-dom@19.0.0/",
-    "react-dom": "https://cdn.jsdelivr.net/npm/react-dom@19.0.0/+esm"
+    "@google/genai": "https://esm.run/@google/genai@1.37.0",
+    "react/": "https://fastly.jsdelivr.net/npm/react@19.0.0/",
+    "react": "https://fastly.jsdelivr.net/npm/react@19.0.0/+esm",
+    "react-dom/": "https://fastly.jsdelivr.net/npm/react-dom@19.0.0/",
+    "react-dom": "https://fastly.jsdelivr.net/npm/react-dom@19.0.0/+esm"
   }
 }
 </script>
 <script type="module" src="index.tsx"></script>
 </head>
-<body class="text-stone-800">
+<body>
     <div id="root">
         <div class="fixed inset-0 flex flex-col items-center justify-center bg-[#F9F7F2]">
-            <div class="loading-pulse mb-4"></div>
-            <p class="text-xs font-bold text-[#8BA888] tracking-widest uppercase">Genie 正在赶来...</p>
-            <p class="text-[10px] text-stone-400 mt-2">正在优化移动端加载路径</p>
+            <div class="loading-pulse mb-6"></div>
+            <p class="text-xs font-bold text-[#8BA888] tracking-widest uppercase">Genie 正在通过镜像节点加载...</p>
         </div>
     </div>
 
     <div id="error-overlay">
         <div class="error-card flex flex-col items-center">
-            <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-8 h-8">
+            <div class="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-7 h-7">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
                 </svg>
             </div>
-            <h2 class="text-lg font-bold text-stone-800 mb-2">连接练习室失败</h2>
-            <p id="error-message" class="text-sm text-stone-500 leading-relaxed mb-8 px-4"></p>
+            <h2 class="text-base font-bold text-stone-800 mb-2">手机网络连接受限</h2>
+            <p id="error-message" class="text-xs text-stone-500 leading-relaxed mb-8 px-4">核心组件加载失败，这通常是因为您的网络环境屏蔽了开发资源库。</p>
             <div class="flex flex-col gap-3 w-full">
-                <button onclick="window.location.reload()" class="w-full py-4 bg-[#6B8E6B] text-white rounded-2xl font-bold shadow-lg active:scale-95 transition-transform">重试连接</button>
-                <button id="diag-btn" onclick="runDiagnostic()" class="w-full py-3 bg-white border border-[#E8E2D6] text-[#8BA888] rounded-2xl font-bold text-xs">一键诊断网络问题</button>
-                <p class="text-[10px] text-stone-400 mt-2">调试环境: <span id="debug-host"></span></p>
+                <button onclick="window.location.reload()" class="w-full py-4 bg-[#6B8E6B] text-white rounded-2xl font-bold shadow-lg active:scale-95">刷新应用</button>
+                <button id="diag-btn" onclick="runDiagnostic()" class="w-full py-3 bg-white border border-stone-200 text-[#8BA888] rounded-2xl font-bold text-xs">诊断网络问题</button>
             </div>
         </div>
     </div>
