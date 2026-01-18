@@ -17,6 +17,24 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #E8E2D6; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #D1C9BC; }
+
+        /* 初始加载占位符样式 */
+        #root:empty::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            margin: -20px 0 0 -20px;
+            border: 3px solid #6B8E6B20;
+            border-top-color: #6B8E6B;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 <script type="importmap">
 {
@@ -28,6 +46,7 @@
   }
 }
 </script>
+<script type="module" src="index.tsx"></script>
 </head>
 <body class="text-stone-800">
     <div id="root"></div>
