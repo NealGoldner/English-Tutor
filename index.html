@@ -3,7 +3,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FluentGenie - AI 护眼英语练习</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -11,31 +11,72 @@
         body { 
           font-family: 'Inter', sans-serif; 
           background-color: #F9F7F2;
+          -webkit-tap-highlight-color: transparent;
+          overflow-x: hidden;
         }
-        /* 自定义滚动条样式 */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #E8E2D6; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #D1C9BC; }
+        /* 适配手机端状态栏 */
+        #root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 
-        /* 初始加载占位符样式 */
-        #root:empty::before {
-            content: "";
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 40px;
-            height: 40px;
-            margin: -20px 0 0 -20px;
-            border: 3px solid #6B8E6B20;
+        #error-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #F9F7F2;
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        /* 骨架屏动画 */
+        .loading-pulse {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #6B8E6B20;
             border-top-color: #6B8E6B;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
+    
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            const root = document.getElementById('root');
+            const overlay = document.getElementById('error-overlay');
+            const errorMsg = document.getElementById('error-message');
+            const errorIcon = document.getElementById('error-icon');
+
+            function showError(msg, isWarning = false) {
+                overlay.style.display = 'flex';
+                errorMsg.innerText = msg;
+                if (isWarning) errorIcon.classList.add('text-amber-500');
+            }
+
+            // 1. 安全上下文检测 (移动端麦克风必备)
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            if (window.location.protocol !== 'https:' && !isLocal) {
+                showError('手机浏览器要求在 HTTPS 环境下才能使用麦克风。请检查您的链接是否以 https:// 开头。');
+                return;
+            }
+
+            // 2. 浏览器内核检测
+            if (!HTMLScriptElement.supports || !HTMLScriptElement.supports('importmap')) {
+                showError('您的浏览器版本过低。如果是 iPhone，请使用 Safari；如果是安卓，请使用 Chrome。');
+                return;
+            }
+
+            // 3. 资源加载监控
+            window.addEventListener('error', (e) => {
+                if (e.target.tagName === 'SCRIPT') {
+                    showError('部分核心资源加载失败。如果您处于特殊网络环境，请尝试切换 Wi-Fi 或移动数据。', true);
+                }
+            }, true);
+        });
+    </script>
+
 <script type="importmap">
 {
   "imports": {
@@ -49,6 +90,27 @@
 <script type="module" src="index.tsx"></script>
 </head>
 <body class="text-stone-800">
-    <div id="root"></div>
+    <div id="root">
+        <!-- 初始加载状态 -->
+        <div class="fixed inset-0 flex flex-col items-center justify-center bg-[#F9F7F2]">
+            <div class="loading-pulse mb-4"></div>
+            <p class="text-xs font-bold text-[#8BA888] tracking-widest uppercase">Genie 正在赶来...</p>
+        </div>
+    </div>
+
+    <!-- 错误反馈层 -->
+    <div id="error-overlay">
+        <div id="error-icon" class="w-20 h-20 bg-white shadow-xl rounded-full flex items-center justify-center mb-6 text-red-500">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-10 h-10">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+            </svg>
+        </div>
+        <h2 class="text-xl font-bold text-stone-800 mb-3">无法进入练习室</h2>
+        <p id="error-message" class="text-sm text-stone-500 max-w-xs leading-relaxed mb-8"></p>
+        <div class="flex flex-col gap-3 w-full max-w-[240px]">
+            <button onclick="window.location.reload()" class="w-full py-4 bg-[#6B8E6B] text-white rounded-2xl font-bold shadow-lg active:scale-95 transition-transform">重新加载页面</button>
+            <button onclick="window.location.href='https://' + window.location.host" class="text-xs text-[#8BA888] font-bold py-2">尝试强制 HTTPS 访问</button>
+        </div>
+    </div>
 </body>
 </html>
