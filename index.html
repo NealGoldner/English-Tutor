@@ -52,16 +52,50 @@
     <script>
         window.APP_LOADED = false;
         
-        // 全局错误捕获
-        window.addEventListener('error', (event) => {
-            if (event.target.tagName === 'SCRIPT' || event.message?.includes('import')) {
-                showError('核心脚本加载失败。这通常是因为您的网络无法访问某些资源服务器（如 esm.sh）。请尝试切换 Wi-Fi 或开启/关闭流量再试。');
+        // 网络诊断工具
+        const checkResource = async (url) => {
+            try {
+                const start = Date.now();
+                const res = await fetch(url, { mode: 'no-cors', cache: 'no-cache' });
+                return { ok: true, time: Date.now() - start };
+            } catch (e) {
+                return { ok: false };
             }
-        }, true);
+        };
 
-        window.addEventListener('unhandledrejection', (event) => {
-            console.error('Unhandled rejection:', event.reason);
-        });
+        async function runDiagnostic() {
+            const btn = document.getElementById('diag-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "诊断中...";
+            btn.disabled = true;
+
+            const results = {
+                'React核心库': await checkResource('https://cdn.jsdelivr.net/npm/react@19.0.0/+esm'),
+                'GenAI SDK': await checkResource('https://esm.sh/@google/genai@1.37.0'),
+                'Tailwind样式': await checkResource('https://cdn.tailwindcss.com'),
+                '谷歌字体库': await checkResource('https://fonts.googleapis.com')
+            };
+
+            let report = "【网络连通性诊断】\n\n";
+            let failCount = 0;
+            for (const [name, res] of Object.entries(results)) {
+                if (res.ok) {
+                    report += `✅ ${name}: 连通正常 (${res.time}ms)\n`;
+                } else {
+                    report += `❌ ${name}: 连接失败 (请检查网络阻断)\n`;
+                    failCount++;
+                }
+            }
+
+            btn.innerText = originalText;
+            btn.disabled = false;
+
+            if (failCount > 0) {
+                alert(report + "\n建议措施：\n1. 尝试切换手机流量/Wi-Fi\n2. 检查浏览器是否开启了过度严格的广告过滤\n3. 检查您的设备时间是否正确。");
+            } else {
+                alert(report + "\n资源连接正常，但应用仍无法启动。请尝试清理浏览器缓存后重试。");
+            }
+        }
 
         function showError(msg) {
             const overlay = document.getElementById('error-overlay');
@@ -72,19 +106,24 @@
             }
         }
 
+        window.addEventListener('error', (event) => {
+            if (event.target.tagName === 'SCRIPT' || event.message?.includes('import')) {
+                showError('核心脚本加载被网络拦截。请尝试切换网络环境（如从Wi-Fi切至流量）。');
+            }
+        }, true);
+
         window.addEventListener('DOMContentLoaded', () => {
-            // 1. 安全环境检测
             if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-                showError('为了保护隐私并使用麦克风，请确保地址栏以 https:// 开头。');
+                showError('为了启用麦克风和隐私保护，请确保使用 HTTPS 链接访问应用。');
                 return;
             }
 
-            // 2. 超时监控：12秒还没加载完就报错
+            // 加载超时监控延长至15秒
             setTimeout(() => {
                 if (!window.APP_LOADED) {
-                    showError('加载时间过长。可能是 CDN 资源加载缓慢或被拦截。建议尝试：\n1. 刷新页面\n2. 切换到 Wi-Fi 网络\n3. 确保没有开启广告过滤插件');
+                    showError('连接超时。当前网络可能无法顺畅加载本应用的云端核心组件。');
                 }
-            }, 12000);
+            }, 15000);
         });
     </script>
 
@@ -92,17 +131,12 @@
 {
   "imports": {
     "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+    "react/": "https://cdn.jsdelivr.net/npm/react@19.0.0/",
+    "react": "https://cdn.jsdelivr.net/npm/react@19.0.0/+esm",
+    "react-dom/": "https://cdn.jsdelivr.net/npm/react-dom@19.0.0/",
+    "react-dom": "https://cdn.jsdelivr.net/npm/react-dom@19.0.0/+esm"
   }
 }
-</script>
-<script type="module">
-    // 标记应用开始加载
-    import 'react';
-    import 'react-dom';
-    // 如果上面两个成功加载，说明网络环境 OK
 </script>
 <script type="module" src="index.tsx"></script>
 </head>
@@ -111,7 +145,7 @@
         <div class="fixed inset-0 flex flex-col items-center justify-center bg-[#F9F7F2]">
             <div class="loading-pulse mb-4"></div>
             <p class="text-xs font-bold text-[#8BA888] tracking-widest uppercase">Genie 正在赶来...</p>
-            <p class="text-[10px] text-stone-400 mt-2">正在建立免翻墙安全隧道</p>
+            <p class="text-[10px] text-stone-400 mt-2">正在优化移动端加载路径</p>
         </div>
     </div>
 
@@ -124,10 +158,11 @@
                 </svg>
             </div>
             <h2 class="text-lg font-bold text-stone-800 mb-2">连接练习室失败</h2>
-            <p id="error-message" class="text-sm text-stone-500 leading-relaxed mb-8"></p>
+            <p id="error-message" class="text-sm text-stone-500 leading-relaxed mb-8 px-4"></p>
             <div class="flex flex-col gap-3 w-full">
                 <button onclick="window.location.reload()" class="w-full py-4 bg-[#6B8E6B] text-white rounded-2xl font-bold shadow-lg active:scale-95 transition-transform">重试连接</button>
-                <p class="text-[10px] text-stone-400">当前域名: <span id="debug-host"></span></p>
+                <button id="diag-btn" onclick="runDiagnostic()" class="w-full py-3 bg-white border border-[#E8E2D6] text-[#8BA888] rounded-2xl font-bold text-xs">一键诊断网络问题</button>
+                <p class="text-[10px] text-stone-400 mt-2">当前域名: <span id="debug-host"></span></p>
             </div>
         </div>
         <script>document.getElementById('debug-host').innerText = window.location.hostname;</script>
