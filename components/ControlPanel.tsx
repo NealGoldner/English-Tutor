@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry } from '../types.ts';
 

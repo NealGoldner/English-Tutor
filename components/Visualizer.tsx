@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 import { AppStatus } from '../types.ts';
 
