@@ -2,6 +2,7 @@
 export enum AppStatus {
   IDLE = 'IDLE',
   CONNECTING = 'CONNECTING',
+  RECONNECTING = 'RECONNECTING',
   ACTIVE = 'ACTIVE',
   ERROR = 'ERROR'
 }
@@ -33,7 +34,7 @@ export interface TutorConfig {
   voice: 'Zephyr' | 'Puck' | 'Charon' | 'Kore' | 'Fenrir';
   isTranslationMode: boolean;
   isCorrectionMode: boolean;
-  showTranscription: boolean; // 新增：是否显示文字
+  showTranscription: boolean;
 }
 
 export const TUTOR_TOPICS = [

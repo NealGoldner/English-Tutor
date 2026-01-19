@@ -15,6 +15,9 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [transcriptions, setTranscriptions] = useState<TranscriptionEntry[]>([]);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+
   const [config, setConfig] = useState<TutorConfig>({
     topic: "日常对话",
     difficulty: "入门",
@@ -28,6 +31,11 @@ const App: React.FC = () => {
     input: AudioContext | null;
     output: AudioContext | null;
   }>({ input: null, output: null });
+
+  const statusRef = useRef<AppStatus>(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -57,31 +65,58 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleStart = async () => {
+  const initiateSession = async (isRetry = false) => {
     try {
-      setStatus(AppStatus.CONNECTING);
-      setTranscriptions([]);
+      setStatus(isRetry ? AppStatus.RECONNECTING : AppStatus.CONNECTING);
       const { inputContext, outputContext } = await startLiveSession({
         config,
         onTranscription: handleTranscription,
-        onClose: () => setStatus(AppStatus.IDLE),
+        onClose: (wasIntentional) => {
+          // 如果是非主动断开，且当前状态是 ACTIVE，则尝试重连
+          if (!wasIntentional && statusRef.current === AppStatus.ACTIVE) {
+            handleAutoRetry();
+          } else if (statusRef.current !== AppStatus.RECONNECTING) {
+            setStatus(AppStatus.IDLE);
+          }
+        },
         onError: (err) => {
-          console.error(err);
-          setStatus(AppStatus.ERROR);
+          console.error("Session Error:", err);
+          handleAutoRetry();
         }
       });
       audioContextRef.current = { input: inputContext, output: outputContext };
       setStatus(AppStatus.ACTIVE);
+      setRetryCount(0); // 重置重试计数
     } catch (error) {
       console.error("Failed to start session:", error);
-      setStatus(AppStatus.ERROR);
-      alert("连接失败。请确保您使用的是 HTTPS 链接，且手机网络稳定。");
+      if (isRetry) {
+        handleAutoRetry();
+      } else {
+        setStatus(AppStatus.ERROR);
+      }
     }
   };
 
+  const handleAutoRetry = () => {
+    if (retryCount < MAX_RETRIES) {
+      setRetryCount(prev => prev + 1);
+      console.log(`Attempting reconnect... (${retryCount + 1}/${MAX_RETRIES})`);
+      setTimeout(() => initiateSession(true), 1500);
+    } else {
+      setStatus(AppStatus.ERROR);
+      alert("对话连接多次中断，请检查您的网络环境。");
+    }
+  };
+
+  const handleStart = () => {
+    setTranscriptions([]);
+    setRetryCount(0);
+    initiateSession();
+  };
+
   const handleStop = () => {
-    stopLiveSession();
     setStatus(AppStatus.IDLE);
+    stopLiveSession();
   };
 
   const handleCameraCapture = (base64: string) => {
@@ -126,19 +161,21 @@ const App: React.FC = () => {
               
               <div className="text-center mt-6 z-10">
                 <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
-                  <span className="flex items-center gap-1.5 px-3 py-1 bg-[#6B8E6B]/10 rounded-full text-[9px] font-bold text-[#6B8E6B] border border-[#6B8E6B]/20 uppercase tracking-tight">
-                    <div className="w-1.5 h-1.5 bg-[#6B8E6B] rounded-full animate-pulse"></div>
-                    人声增强模式
+                  <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-bold border uppercase tracking-tight ${status === AppStatus.RECONNECTING ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-[#6B8E6B]/10 text-[#6B8E6B] border-[#6B8E6B]/20'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${status === AppStatus.RECONNECTING ? 'bg-orange-500' : 'bg-[#6B8E6B]'}`}></div>
+                    {status === AppStatus.RECONNECTING ? `自动重连中 (${retryCount}/${MAX_RETRIES})` : '人声增强模式'}
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-[#4A5D4A]">
                   {status === AppStatus.IDLE && "准备好开口了吗？"}
                   {status === AppStatus.CONNECTING && "正在接入免梯节点..."}
+                  {status === AppStatus.RECONNECTING && "连接抖动，修复中..."}
                   {status === AppStatus.ACTIVE && "精灵正在聆听..."}
                   {status === AppStatus.ERROR && "连接暂时中断"}
                 </h2>
                 <p className="text-[#8BA888] mt-2 text-xs font-medium px-4">
                   {status === AppStatus.IDLE && "我们的代理已为您打通网络，直接对话即可。"}
+                  {status === AppStatus.RECONNECTING && "请稍等片刻，我们正在尝试找回您的导师。"}
                   {status === AppStatus.ACTIVE && (config.showTranscription ? "文字流同步中..." : "纯听力挑战模式：专注于声音")}
                 </p>
               </div>

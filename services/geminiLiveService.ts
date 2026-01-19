@@ -5,6 +5,7 @@ import { TutorConfig } from '../types.ts';
 let currentSession: any = null;
 let inputAudioContext: AudioContext | null = null;
 let outputAudioContext: AudioContext | null = null;
+let currentStream: MediaStream | null = null;
 let nextStartTime = 0;
 const sources = new Set<AudioBufferSourceNode>();
 
@@ -32,7 +33,7 @@ async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
+  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
@@ -60,12 +61,16 @@ function createBlob(data: Float32Array): Blob {
 interface StartSessionOptions {
   config: TutorConfig;
   onTranscription: (role: 'user' | 'model', text: string) => void;
-  onClose: () => void;
+  onClose: (wasIntentional: boolean) => void;
   onError: (error: any) => void;
 }
 
 export const startLiveSession = async ({ config, onTranscription, onClose, onError }: StartSessionOptions) => {
-  // 环境检测：如果是 preview 或 localhost，不使用代理
+  // 清理现有资源
+  stopLiveSession();
+
+  nextStartTime = 0;
+
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
   const aiConfig: any = { apiKey: process.env.API_KEY as string };
   if (!isPreview) {
@@ -77,7 +82,11 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
   outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
   
-  const stream = await navigator.mediaDevices.getUserMedia({ 
+  if (outputAudioContext.state === 'suspended') {
+    await outputAudioContext.resume();
+  }
+
+  currentStream = await navigator.mediaDevices.getUserMedia({ 
     audio: {
       echoCancellation: true,
       noiseSuppression: true,
@@ -88,23 +97,28 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   });
   
   const systemInstruction = `
-    你是一位专业的双语英语导师 FluentGenie。
+    你是一位极具耐心且专业的双语英语导师 FluentGenie。
     当前话题: ${config.topic}。 
     难度等级: ${config.difficulty}。
-    务必在每句英文后提供准确的中文翻译。
+    
+    交互规则:
+    1. 务必在每句英文后提供括号包裹的中文翻译。
+    2. 如果用户超过10秒没有说话，请主动用英文询问用户是否还在，并尝试提供一个新的话题切入点。
+    3. 保持会话持续活跃，不要主动结束对话。
+    4. 实时纠正用户的语法错误，但要以鼓励的方式进行。
   `;
 
   const sessionPromise = ai.live.connect({
     model: 'gemini-2.5-flash-native-audio-preview-12-2025',
     callbacks: {
       onopen: () => {
-        const source = inputAudioContext!.createMediaStreamSource(stream);
+        const source = inputAudioContext!.createMediaStreamSource(currentStream!);
         const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
         scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
           const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
           const pcmBlob = createBlob(inputData);
           sessionPromise.then((session) => {
-            session.sendRealtimeInput({ media: pcmBlob });
+            if (session) session.sendRealtimeInput({ media: pcmBlob });
           });
         };
         source.connect(scriptProcessor);
@@ -117,8 +131,12 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           onTranscription('user', message.serverContent.inputTranscription.text);
         }
 
-        const base64EncodedAudioString = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+        const base64EncodedAudioString = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
         if (base64EncodedAudioString && outputAudioContext) {
+          if (outputAudioContext.state === 'suspended') {
+            await outputAudioContext.resume();
+          }
+
           nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
           const audioBuffer = await decodeAudioData(
             decode(base64EncodedAudioString),
@@ -129,13 +147,30 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           const source = outputAudioContext.createBufferSource();
           source.buffer = audioBuffer;
           source.connect(outputAudioContext.destination);
+          
+          source.onended = () => {
+            sources.delete(source);
+          };
+
           source.start(nextStartTime);
           nextStartTime = nextStartTime + audioBuffer.duration;
           sources.add(source);
         }
+
+        if (message.serverContent?.interrupted) {
+          sources.forEach(s => { try { s.stop(); } catch(e){} });
+          sources.clear();
+          nextStartTime = 0;
+        }
       },
-      onerror: (e) => onError(e),
-      onclose: () => onClose()
+      onerror: (e) => {
+        console.error("Live Session Error:", e);
+        onError(e);
+      },
+      onclose: () => {
+        // 通知 App 组件会话已关闭
+        onClose(false); 
+      }
     },
     config: {
       responseModalities: [Modality.AUDIO],
@@ -154,10 +189,18 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
 
 export const stopLiveSession = () => {
   if (currentSession) {
+    sources.forEach(s => { try { s.stop(); } catch(e){} });
+    sources.clear();
     if (inputAudioContext) inputAudioContext.close();
     if (outputAudioContext) outputAudioContext.close();
-    currentSession.close();
+    if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+    try {
+      currentSession.close();
+    } catch(e) {}
     currentSession = null;
+    inputAudioContext = null;
+    outputAudioContext = null;
+    currentStream = null;
   }
 };
 
