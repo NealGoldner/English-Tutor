@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
-import { TutorConfig } from '../types.ts';
+import { TutorConfig } from '../types';
 
 let currentSession: any = null;
 let inputAudioContext: AudioContext | null = null;
@@ -23,6 +23,7 @@ function decode(base64: string) {
   return bytes;
 }
 
+// Custom PCM decoding function for raw audio streams
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
@@ -44,52 +45,62 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   stopLiveSession();
   nextStartTime = 0;
 
+  const isPreviewEnv = window.location.hostname.includes('de5.net') || window.location.hostname.includes('aistudio');
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
   
-  // 关键修复：同时恢复输入和输出上下文，解决移动端无声问题
   try { 
-    await Promise.all([
-      inputAudioContext.resume(),
-      outputAudioContext.resume()
-    ]);
-    console.log("AudioContext 已激活");
-  } catch (e) {
-    console.warn("AudioContext 激活失败:", e);
-  }
+    await Promise.all([inputAudioContext.resume(), outputAudioContext.resume()]);
+  } catch (e) { console.warn("音频上下文启动受阻", e); }
 
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("麦克风流已获取");
   } catch (e: any) {
-    const msg = e.name === 'NotAllowedError' ? "请授权麦克风权限" : "麦克风启动失败";
+    const msg = e.name === 'NotAllowedError' ? "请在浏览器地址栏点击锁头图标，授权麦克风权限。" : "无法访问麦克风。";
     onError(msg);
     throw new Error(msg);
   }
 
+  // Guidelines: Always use new GoogleGenAI({apiKey: process.env.API_KEY})
   const ai = new GoogleGenAI({ 
-    apiKey: process.env.API_KEY || 'PROXY_KEY',
-    baseUrl: window.location.origin + '/api'
+    apiKey: process.env.API_KEY,
+    ...(isPreviewEnv ? {} : { baseUrl: window.location.origin + '/api' })
   } as any);
   
-  const systemInstruction = `你是一位专业的双语英语导师 FluentGenie。话题: "${config.topic}"。请务必在每句英文后提供中文翻译。`;
+  // Personality definitions for the tutor
+  const personalityPrompts: Record<string, string> = {
+    '幽默达人': "你是一个极其幽默、爱开玩笑且充满活力的英语导师。你会使用有趣的表情符号和地道的俚语。如果对话变得枯燥，请立刻通过讲冷笑话或分享趣事来打破僵局。翻译也要翻译得有梗一些。",
+    '电影编剧': "你是一个富有戏剧感的创意编剧。对话中你喜欢随时开启角色扮演模式（比如：突然假装我们在太空旅行）。你会用丰富的辞藻描述场景，引导用户进入虚构故事中学习英文。",
+    '严厉教官': "你是一个极其追求完美的英语教官，虽然严厉但很有魅力。你会纠正用户每一个细微的发音或语法错误，要求用户重新朗读。你的赞美非常珍贵，但一旦给出，说明用户表现真的棒极了。"
+  };
 
-  console.log("正在通过安全隧道建立 WebSocket...");
+  const systemInstruction = `
+    你现在是 FluentGenie，身份是：${personalityPrompts[config.personality || '幽默达人']}。
+    
+    核心规则：
+    1. 话题背景："${config.topic}"。难度等级：${config.difficulty}。
+    2. 禁止枯燥：绝对不要只说“How are you?”或重复用户的话。要主动挑起话题，提出意想不到的后续问题。
+    3. 双语教学：每一句英文回复后必须紧跟对应的中文翻译。
+    4. 情绪互动：在文本回复中适度加入 emoji，增加视觉上的亲和力。
+    5. 视觉分析：如果用户上传了照片，请用最惊叹的语气进行描述并教学。
+  `.trim();
 
   try {
     const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("WebSocket 通道已开启，流媒体传输启动");
+          console.log("WebSocket 连接成功");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
-            if (currentSession) {
-              const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-              sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
-            }
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcmBlob = createBlob(inputData);
+            // CRITICAL: Ensure data is streamed only after session promise resolves
+            sessionPromise.then(session => {
+              if (session) session.sendRealtimeInput({ media: pcmBlob });
+            });
           };
           source.connect(scriptProcessor);
           scriptProcessor.connect(inputAudioContext!.destination);
@@ -108,16 +119,18 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             source.start(nextStartTime);
             nextStartTime += buffer.duration;
             sources.add(source);
+            
+            source.onended = () => sources.delete(source);
+          }
+
+          if (message.serverContent?.interrupted) {
+            sources.forEach(s => s.stop());
+            sources.clear();
+            nextStartTime = 0;
           }
         },
-        onerror: (e: any) => {
-          console.error("WebSocket 运行时错误:", e);
-          onError(`实时通话异常: ${e.message || '网络连接不稳定'}`);
-        },
-        onclose: () => {
-          console.log("会话已正常关闭");
-          onClose(false);
-        }
+        onerror: (e: any) => onError(`通话中断: ${e.message || '请检查您的网络连接'}`),
+        onclose: () => onClose(false)
       },
       config: {
         responseModalities: [Modality.AUDIO],
@@ -128,17 +141,14 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       },
     });
 
-    // 延长超时时间到 25 秒，以应对跨国握手延迟
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("连接握手超时，请尝试切换网络环境（如切换 4G/5G 或 WiFi）")), 25000)
+      setTimeout(() => reject(new Error("连接服务超时，请确保网络环境。")), 15000)
     );
 
     currentSession = await Promise.race([sessionPromise, timeoutPromise]);
-    console.log("握手成功，Genie 已就绪");
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    console.error("连接建立过程被阻断:", err);
-    onError(err.message || "由于网络环境受限，无法建立安全连接。");
+    onError(err.message);
     throw err;
   }
 };
@@ -159,5 +169,7 @@ export const stopLiveSession = () => {
 };
 
 export const sendImageFrame = (b64: string) => {
-  currentSession?.sendRealtimeInput({ media: { data: b64, mimeType: 'image/jpeg' } });
+  if (currentSession) {
+    currentSession.sendRealtimeInput({ media: { data: b64, mimeType: 'image/jpeg' } });
+  }
 };

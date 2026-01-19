@@ -1,10 +1,11 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { TranscriptionEntry, TopicResource } from "../types.ts";
+import { TranscriptionEntry, TopicResource } from "../types";
 
+// Standard client initialization using environment API key
 const getAI = () => {
   return new GoogleGenAI({ 
-    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    apiKey: process.env.API_KEY,
     baseUrl: window.location.origin + '/api'
   } as any);
 };
@@ -18,7 +19,7 @@ export const generateLiveSuggestions = async (
 
   const ai = getAI();
   
-  // 提取最近的对话历史作为上下文
+  // Extract context from recent history
   const context = history.slice(-6).map(m => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.text}`).join('\n');
   
   const prompt = `
@@ -66,6 +67,7 @@ export const generateLiveSuggestions = async (
     const text = response.text;
     if (!text) return [];
     
+    // Clean up markdown markers if the model includes them
     const cleanedJson = text.replace(/```json|```/g, "").trim();
     return JSON.parse(cleanedJson);
   } catch (err) {

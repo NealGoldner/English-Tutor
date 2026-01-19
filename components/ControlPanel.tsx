@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry, SessionHistory } from '../types.ts';
+import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry } from '../types.ts';
 
 interface ControlPanelProps {
   status: AppStatus;
@@ -17,7 +17,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setConfig, 
   onStart, 
   onStop,
-  transcriptions = []
 }) => {
   const isConnecting = status === AppStatus.CONNECTING || status === AppStatus.RECONNECTING;
   const isActive = status === AppStatus.ACTIVE;
@@ -28,6 +27,27 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         
         {(!isActive && status !== AppStatus.RECONNECTING) && (
           <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* 顶层：性格选择器 - 新增 */}
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-bold text-[#6B8E6B] uppercase tracking-[0.2em] ml-1">导师性格 · Personality</label>
+              <div className="flex bg-[#F9F7F2] border border-[#E8E2D6] rounded-2xl p-1 gap-1">
+                {(['幽默达人', '电影编剧', '严厉教官'] as const).map((p) => (
+                  <button
+                    key={p}
+                    disabled={isConnecting}
+                    onClick={() => setConfig(prev => ({ ...prev, personality: p }))}
+                    className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${
+                      config.personality === p 
+                        ? 'bg-white text-[#6B8E6B] shadow-sm scale-[1.02]' 
+                        : 'text-[#8BA888] hover:text-[#4A5D4A]'
+                    }`}
+                  >
+                    {p === '幽默达人' ? '✨ 幽默达人' : p === '电影编剧' ? '🎬 电影编剧' : '💂 严厉教官'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold text-[#8BA888] uppercase tracking-[0.2em] ml-1">练习话题</label>
@@ -63,29 +83,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </div>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {[
-                { label: '中英双语', sub: '实时同步翻译', key: 'isTranslationMode', activeColor: 'bg-[#6B8E6B]' },
-                { label: '深度纠错', sub: '精修语法发音', key: 'isCorrectionMode', activeColor: 'bg-[#C48B4D]' },
-                { label: '实时字幕', sub: '显示对话文本', key: 'showTranscription', activeColor: 'bg-[#6B8E6B]' }
-              ].map((toggle) => (
-                <button 
-                  key={toggle.key}
-                  disabled={isConnecting}
-                  onClick={() => setConfig(prev => ({...prev, [toggle.key]: !prev[toggle.key as keyof TutorConfig]}))}
-                  className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${config[toggle.key as keyof TutorConfig] ? 'bg-white border-[#6B8E6B]/20 shadow-sm' : 'bg-white/50 border-[#E8E2D6]'}`}
-                >
-                  <div className="text-left">
-                    <span className="text-sm font-bold text-[#4A5D4A]">{toggle.label}</span>
-                    <p className="text-[10px] text-[#8BA888] font-medium">{toggle.sub}</p>
-                  </div>
-                  <div className={`w-10 h-5 rounded-full relative transition-colors ${config[toggle.key as keyof TutorConfig] ? toggle.activeColor : 'bg-[#E8E2D6]'}`}>
-                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-300 ${config[toggle.key as keyof TutorConfig] ? 'translate-x-5' : ''}`}></div>
-                  </div>
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
@@ -97,7 +94,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             >
               <span className="flex items-center gap-2 text-lg">
                 <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
-                {status === AppStatus.RECONNECTING ? "停止并退出重连" : "结束本次课程"}
+                {status === AppStatus.RECONNECTING ? "停止并退出重连" : "结束本次有趣的交流"}
               </span>
             </button>
           ) : (
@@ -122,7 +119,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           <path d="M8.25 4.5a3.75 3.75 0 1 1 7.5 0v8.25a3.75 3.75 0 1 1-7.5 0V4.5Z" />
                       </svg>
                   </div>
-                  <span className="text-xl">开始对话</span>
+                  <span className="text-xl">开始这场奇妙对话</span>
                 </>
               )}
             </button>

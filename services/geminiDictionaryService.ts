@@ -1,9 +1,10 @@
 
 import { GoogleGenAI } from "@google/genai";
 
+// Standard client initialization using environment API key
 const getAI = () => {
   return new GoogleGenAI({ 
-    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    apiKey: process.env.API_KEY,
     baseUrl: window.location.origin + '/api'
   } as any);
 };

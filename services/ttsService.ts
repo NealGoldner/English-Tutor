@@ -1,9 +1,10 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
+// Standard client initialization using environment API key
 const getAI = () => {
   return new GoogleGenAI({ 
-    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    apiKey: process.env.API_KEY,
     baseUrl: window.location.origin + '/api'
   } as any);
 };
@@ -30,6 +31,7 @@ export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
       source.start();
     }
   } catch (err) {
+    // Fallback to browser TTS if API fails
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
     window.speechSynthesis.speak(utterance);
@@ -43,6 +45,7 @@ function decodeBase64(b64: string) {
   return b;
 }
 
+// PCM decoding for raw audio
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
   const d = new Int16Array(data.buffer);
   const b = ctx.createBuffer(1, d.length, 24000);
