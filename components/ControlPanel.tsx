@@ -1,5 +1,5 @@
 
-import React;
+import React from 'react';
 import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry } from '../types.ts';
 
 interface ControlPanelProps {
@@ -18,7 +18,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onStart, 
   onStop,
 }) => {
-  // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
   const isConnecting = status === AppStatus.CONNECTING;
   const isActive = status === AppStatus.ACTIVE;
 
@@ -26,10 +25,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     <div className="bg-[#FFFFFF]/90 backdrop-blur-2xl border-t border-[#E8E2D6] p-4 pb-8 md:p-8 sticky bottom-0 shadow-[0_-15px_40px_rgba(74,93,74,0.08)] z-50 rounded-t-[2.5rem]">
       <div className="max-w-3xl mx-auto flex flex-col gap-6">
         
-        {/* Fix: AppStatus.RECONNECTING does not exist, simplifying condition to hide config when active or connecting */}
         {(!isActive && !isConnecting) && (
           <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* 顶层：性格选择器 - 新增 */}
             <div className="flex flex-col gap-2">
               <label className="text-[10px] font-bold text-[#6B8E6B] uppercase tracking-[0.2em] ml-1">导师性格 · Personality</label>
               <div className="flex bg-[#F9F7F2] border border-[#E8E2D6] rounded-2xl p-1 gap-1">
@@ -89,7 +86,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         )}
 
         <div className="flex gap-4">
-          {/* Fix: AppStatus.RECONNECTING does not exist, simplifying condition to show stop button when active */}
           {isActive ? (
             <button 
               onClick={onStop}

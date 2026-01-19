@@ -9,10 +9,9 @@ interface VisualizerProps {
 
 const Visualizer: React.FC<VisualizerProps> = ({ status, audioContext }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
     const isWorking = status === AppStatus.ACTIVE || status === AppStatus.CONNECTING;
     if (!isWorking || !audioContext) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -33,10 +32,8 @@ const Visualizer: React.FC<VisualizerProps> = ({ status, audioContext }) => {
       const centerY = height / 2;
       const baseRadius = 60;
       
-      // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
-      const mainColor = status === AppStatus.CONNECTING ? '249, 115, 22' : '107, 142, 107'; // 橙色 vs 绿色
+      const mainColor = status === AppStatus.CONNECTING ? '249, 115, 22' : '107, 142, 107'; 
       
-      // 多层脉冲
       for (let i = 0; i < 4; i++) {
         ctx.beginPath();
         const pulse = Math.sin(phase + i * Math.PI / 2) * 20;
@@ -49,13 +46,11 @@ const Visualizer: React.FC<VisualizerProps> = ({ status, audioContext }) => {
         ctx.stroke();
       }
       
-      // 中心主圆
       ctx.beginPath();
       ctx.fillStyle = `rgb(${mainColor})`;
       ctx.arc(centerX, centerY, baseRadius - 5, 0, Math.PI * 2);
       ctx.fill();
       
-      // 动态声波
       ctx.beginPath();
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 3;

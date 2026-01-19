@@ -9,14 +9,12 @@ let currentStream: MediaStream | null = null;
 let nextStartTime = 0;
 const sources = new Set<AudioBufferSourceNode>();
 
-// Manual base64 encoding implementation as required by guidelines
 function encode(bytes: Uint8Array) {
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-// Manual base64 decoding implementation as required by guidelines
 function decode(base64: string) {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
@@ -24,7 +22,6 @@ function decode(base64: string) {
   return bytes;
 }
 
-// Manual PCM audio decoding for raw stream as required by guidelines
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
@@ -51,7 +48,6 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   stopLiveSession();
   nextStartTime = 0;
 
-  // 1. 初始化音频环境
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
@@ -63,25 +59,30 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     throw e;
   }
 
-  // 2. Initialize GoogleGenAI instance using process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const personalityMap: Record<string, string> = {
-    '幽默达人': "You are super funny. Translation is REQUIRED.",
-    '电影编剧': "You are dramatic. Translation is REQUIRED.",
-    '严厉教官': "You are strict. Translation is REQUIRED."
+    '幽默达人': "You are funny and lighthearted.",
+    '电影编剧': "You speak like a character in a movie script.",
+    '严厉教官': "You are strict and provide concise feedback."
   };
 
   const systemInstruction = `
-    Role: English Tutor FluentGenie.
+    Role: English Oral Tutor (FluentGenie).
     Personality: ${personalityMap[config.personality || '幽默达人']}
-    Topic: "${config.topic}".
-    RULE: Follow EVERY English sentence with its Chinese translation. NO EXCEPTIONS.
-    Keep it a natural, spoken conversation.
+    Current Topic: "${config.topic}".
+    User Level: ${config.difficulty}.
+
+    CRITICAL RULES:
+    1. AUDIO: Speak ONLY English in your voice response. NEVER speak Chinese.
+    2. TEXT: In the text transcription, provide your English response first, then a newline, and then the Chinese translation.
+    3. FORMAT: 
+       [English Sentence]
+       [Chinese Translation]
+    4. Keep sentences short and conversational to help the user practice speaking.
   `.trim();
 
   try {
-    // 3. Establish Live session connection
     const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
@@ -90,7 +91,6 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
-            // CRITICAL: Always use the sessionPromise to send data to prevent race conditions and stale closures
             const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
             sessionPromise.then(session => {
               session.sendRealtimeInput({ media: pcmBlob });
@@ -110,7 +110,6 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             const source = outputAudioContext.createBufferSource();
             source.buffer = buffer;
             source.connect(outputAudioContext.destination);
-            // Gapless playback scheduling
             source.start(nextStartTime);
             nextStartTime += buffer.duration;
             sources.add(source);
@@ -121,15 +120,12 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           console.error("Gemini Live Error:", e);
           const msg = e.reason || e.message || "WebSocket Error";
           if (msg.includes("not implemented")) {
-            onError("API 未启用", "当前 API Key 所在的地区或项目未启用 Live API 功能。");
+            onError("API 未启用", "当前项目未启用 Live API。");
           } else {
             onError("通话意外中断", msg);
           }
         },
-        onclose: () => { 
-          console.log("WebSocket closed.");
-          onClose(); 
-        }
+        onclose: () => { onClose(); }
       },
       config: {
         responseModalities: [Modality.AUDIO],
