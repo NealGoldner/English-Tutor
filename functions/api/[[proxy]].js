@@ -7,14 +7,22 @@ export async function onRequest(context) {
   const path = params.proxy ? params.proxy.join('/') : '';
   const googleUrl = new URL(`https://generativelanguage.googleapis.com/${path}${url.search}`);
 
-  // 2. 准备请求头，清除可能导致冲突的宿主头
+  // 2. 准备请求头
   const headers = new Headers(request.headers);
   headers.set('Host', 'generativelanguage.googleapis.com');
   
-  // 3. API KEY 注入逻辑
+  // 3. 增强版占位符识别
   const headerKey = headers.get('x-goog-api-key');
   const urlKey = googleUrl.searchParams.get('key');
-  const isPlaceholder = (k) => !k || k === 'PROXY_KEY' || k === 'API_KEY_PLACEHOLDER' || k === 'undefined';
+  
+  const isPlaceholder = (k) => {
+    if (!k) return true;
+    const key = k.toLowerCase();
+    return key === 'proxy_key' || 
+           key === 'api_key_placeholder' || 
+           key === 'undefined' || 
+           key === 'empty_key_use_proxy_injection';
+  };
 
   if (env.API_KEY) {
     if (isPlaceholder(headerKey)) {
@@ -25,7 +33,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 处理 OPTIONS 预检请求
+  // 处理 OPTIONS 预检
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       headers: {
@@ -38,29 +46,24 @@ export async function onRequest(context) {
   }
 
   try {
-    // 4. 处理 WebSocket 握手 (Live API 的核心)
+    // 4. WebSocket 隧道 (Live API)
     const upgradeHeader = request.headers.get('Upgrade');
     if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
-      // 在 Cloudflare Workers 环境下转发 WebSocket
       const [client, server] = new WebSocketPair();
       
       const serverResponse = await fetch(googleUrl.toString(), {
         headers: headers,
-        edispatch: true, // 开启 WebSocket 转发
       });
 
       if (serverResponse.status === 101) {
-        // 成功建立隧道
         const webSocket = serverResponse.webSocket;
-        if (!webSocket) throw new Error("Google didn't return a websocket");
+        if (!webSocket) throw new Error("Backend did not provide a websocket");
         
         webSocket.accept();
-        
-        // 双向管道
         server.accept();
+        
         server.addEventListener('message', event => webSocket.send(event.data));
         webSocket.addEventListener('message', event => server.send(event.data));
-        
         server.addEventListener('close', () => webSocket.close());
         webSocket.addEventListener('close', () => server.close());
 
@@ -72,7 +75,7 @@ export async function onRequest(context) {
       return serverResponse;
     }
 
-    // 5. 普通 REST 请求转发
+    // 5. REST 转发
     const response = await fetch(googleUrl.toString(), {
       method: request.method,
       headers: headers,
@@ -80,7 +83,6 @@ export async function onRequest(context) {
       redirect: 'manual'
     });
 
-    // 6. 响应封装与 CORS
     const newRes = new Response(response.body, response);
     newRes.headers.set('Access-Control-Allow-Origin', '*');
     newRes.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -88,12 +90,7 @@ export async function onRequest(context) {
     
     return newRes;
   } catch (err) {
-    console.error("Tunnel Error:", err);
-    return new Response(JSON.stringify({ 
-      error: "Connection Interrupted", 
-      message: err.message,
-      hint: "系统正在尝试自动恢复，请稍候。"
-    }), { 
+    return new Response(JSON.stringify({ error: "Gateway Error", message: err.message }), { 
       status: 502,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });

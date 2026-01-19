@@ -56,38 +56,39 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   
   try { 
     await Promise.all([inputAudioContext.resume(), outputAudioContext.resume()]);
-  } catch (e) { console.warn("音频系统启动失败", e); }
+  } catch (e) { console.warn("Audio system start delayed", e); }
 
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e: any) {
-    const msg = e.name === 'NotAllowedError' ? "请授予麦克风权限。" : "无法访问麦克风。";
+    const msg = e.name === 'NotAllowedError' ? "请在浏览器设置中允许麦克风访问。" : "麦克风初始化失败。";
     onError(msg);
     throw new Error(msg);
   }
 
-  // 关键修复：确保 apiKey 永远不为空，避免 SDK 抛出 early error
+  // 使用 PROXY_KEY 作为通用占位符，匹配后端 [[proxy]].js 的判断
   const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') 
     ? process.env.API_KEY 
-    : 'EMPTY_KEY_USE_PROXY_INJECTION';
+    : 'PROXY_KEY';
 
   const ai = new GoogleGenAI({ 
     apiKey: apiKey,
+    // 将 API 根路径指向本地代理，解决国内直连问题
     baseUrl: `${window.location.origin}/api`
   } as any);
   
   const personalityPrompts: Record<string, string> = {
-    '幽默达人': "你是一个极其幽默的英语导师，擅长开玩笑。每一句英文回复后必须紧跟中文翻译。",
-    '电影编剧': "你是一个富有创造力的编剧，喜欢用戏剧化的方式交流。每一句英文回复后必须紧跟中文翻译。",
-    '严厉教官': "你是一个非常严格的英语教官，注重纠错。每一句英文回复后必须紧跟中文翻译。"
+    '幽默达人': "你是一个极具幽默感的导师。每一句英文回复后必须紧跟中文翻译。",
+    '电影编剧': "你是一个富有戏剧张力的编剧。每一句英文回复后必须紧跟中文翻译。",
+    '严厉教官': "你是一个极其严格的英语教官，注重语法纠错。每一句英文回复后必须紧跟中文翻译。"
   };
 
   const systemInstruction = `
     Identity: FluentGenie (${personalityPrompts[config.personality || '幽默达人']})
-    Current Topic: "${config.topic}". Level: ${config.difficulty}.
+    Topic: "${config.topic}". Learner Level: ${config.difficulty}.
     Rules: 
     1. ALWAYS provide Chinese translation after every English sentence.
-    2. Keep responses short and engaging to encourage the user to speak.
+    2. Respond with SHORT sentences to encourage user interaction.
   `.trim();
 
   try {
@@ -95,7 +96,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("Connected to FluentGenie (Proxy Mode Active)");
+          console.log("Connected to proxy gateway.");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
@@ -131,14 +132,14 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          console.error("Live Session Error:", e);
+          console.error("Live Stream Error:", e);
           const msg = e.message?.toLowerCase() || "";
           if (msg.includes('429') || msg.includes('quota')) {
-            onError("API 配额已满。系统将尝试在 10s 后自动重连...");
-          } else if (msg.includes('api key')) {
-            onError("API Key 验证失败，请确保您在 Cloudflare/Vercel 后端配置了 API_KEY。");
+            onError("当前线路拥挤（429）。正在排队重连，请稍候...");
+          } else if (msg.includes('key')) {
+            onError("API Key 无效。请检查环境变量设置。");
           } else {
-            onError("网络连接不稳定，建议检查网络环境。");
+            onError("连接中断：请确保您的网络环境可以访问代理网关。");
           }
         },
         onclose: (e: any) => {
@@ -158,7 +159,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    onError(err.message || "无法启动会话，请刷新重试。");
+    onError(err.message || "无法建立语音通道。");
     throw err;
   }
 };
