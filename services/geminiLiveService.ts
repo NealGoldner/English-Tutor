@@ -69,14 +69,16 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   stopLiveSession();
   nextStartTime = 0;
 
-  // 1. 初始化音频上下文 (必须在用户点击的回调内)
+  // 1. 初始化音频上下文 (支持 iOS Safari)
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
   
-  // 立即尝试恢复，确保移动端可用
-  if (outputAudioContext.state === 'suspended') {
+  // 关键：立即尝试 resume，这是移动端发声的前提
+  try {
     await outputAudioContext.resume();
+  } catch (e) {
+    console.warn("AudioContext resume failed", e);
   }
 
   // 2. 获取麦克风权限
@@ -90,16 +92,17 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
         sampleRate: 16000
       } 
     });
-  } catch (e) {
-    onError("无法获取麦克风权限，请检查系统设置。");
-    throw e;
+  } catch (e: any) {
+    const err = e.name === 'NotAllowedError' ? "权限限制：请在系统设置中允许浏览器访问麦克风。" : `麦克风初始化失败: ${e.message}`;
+    onError(err);
+    throw new Error(err);
   }
 
   // 3. 配置 AI
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
   const aiConfig: any = { apiKey: process.env.API_KEY as string };
   if (!isPreview) {
-    // 确保路径以 /api 开头
+    // 强制使用本地 Cloudflare Proxy 节点
     aiConfig.baseUrl = `${window.location.origin}/api`;
   }
 
@@ -110,7 +113,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     交互规则:
     1. 务必在每句英文后提供括号包裹的中文翻译。
     2. 温柔倾听，排队回答。
-    3. 纠正语法时要温柔。
+    3. 如果用户正在练习 "${config.topic}"，请围绕该话题展开，难度设定为 "${config.difficulty}"。
   `;
 
   try {
@@ -118,7 +121,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("WebSocket Connection Opened");
+          console.log("WebSocket Tunnel Opened");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
@@ -140,10 +143,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
 
           const base64EncodedAudioString = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
           if (base64EncodedAudioString && outputAudioContext) {
-            if (outputAudioContext.state === 'suspended') {
-              await outputAudioContext.resume();
-            }
-
+            if (outputAudioContext.state === 'suspended') await outputAudioContext.resume();
             nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
             const audioBuffer = await decodeAudioData(decode(base64EncodedAudioString), outputAudioContext, 24000, 1);
             const source = outputAudioContext.createBufferSource();
@@ -155,11 +155,19 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             sources.add(source);
           }
         },
-        onerror: (e) => {
-          console.error("Session Error:", e);
-          onError("连接异常断开，可能是代理线路繁忙，请重试。");
+        onerror: (e: any) => {
+          console.error("Gemini Session Error:", e);
+          const detail = e.message || "握手协议被拦截";
+          onError(`云端隧道异常: ${detail} (请检查是否开启了省流量模式)`);
         },
-        onclose: () => onClose(false)
+        onclose: (e: any) => {
+          console.log("Gemini Session Closed:", e);
+          // 1006 通常是网络中断或代理被墙
+          if (e.code === 1006) {
+            onError("连接被网络服务商重置 (Error 1006)，尝试自动修复中...");
+          }
+          onClose(false);
+        }
       },
       config: {
         responseModalities: [Modality.AUDIO],
@@ -174,8 +182,9 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
 
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
-  } catch (err) {
-    onError(`初始化失败: ${err.message || '网络连接被重置'}`);
+  } catch (err: any) {
+    const errorMsg = err.message?.includes('403') ? "403 Forbidden: API密钥校验失败或地区受限。" : `握手失败: ${err.message}`;
+    onError(errorMsg);
     throw err;
   }
 };

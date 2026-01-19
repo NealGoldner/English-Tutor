@@ -50,7 +50,6 @@ const App: React.FC = () => {
     }
 
     const lastEntry = transcriptions[transcriptions.length - 1];
-    // 只有当模型说完话时才触发建议生成
     if (lastEntry.role === 'model') {
       const timer = setTimeout(async () => {
         setIsGeneratingSuggestions(true);
@@ -68,7 +67,7 @@ const App: React.FC = () => {
         } finally {
           setIsGeneratingSuggestions(false);
         }
-      }, 1000); // 1秒防抖，避免频繁调用
+      }, 1000);
 
       return () => clearTimeout(timer);
     }
@@ -117,14 +116,18 @@ const App: React.FC = () => {
         },
         onError: (err) => {
           setErrorMessage(err);
-          handleAutoRetry();
+          // 如果是明确的权限错误，不自动重试
+          if (!err.includes("权限") && !err.includes("403")) handleAutoRetry();
+          else setStatus(AppStatus.ERROR);
         }
       });
       
       audioContextRef.current = { input: inputContext, output: outputContext };
       setStatus(AppStatus.ACTIVE);
       setRetryCount(0);
-    } catch (error) {
+    } catch (error: any) {
+      const msg = error.message || "无法建立连接，请检查移动网络配置。";
+      setErrorMessage(msg);
       if (!isRetry) setStatus(AppStatus.ERROR);
     }
   };
@@ -132,7 +135,7 @@ const App: React.FC = () => {
   const handleAutoRetry = () => {
     if (retryCount < MAX_RETRIES) {
       setRetryCount(prev => prev + 1);
-      setTimeout(() => initiateSession(true), 1500);
+      setTimeout(() => initiateSession(true), 2500); // 增加间隔以等待网络波动
     } else {
       setStatus(AppStatus.ERROR);
     }
@@ -171,26 +174,28 @@ const App: React.FC = () => {
 
         {activeMode === MainMode.PRACTICE ? (
           <>
-            <div className={`bg-[#FFFFFF]/80 backdrop-blur-sm rounded-[2.5rem] shadow-sm border p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 shrink-0 ${status === AppStatus.ERROR ? 'border-red-200' : 'border-[#E8E2D6]'}`}>
+            <div className={`bg-[#FFFFFF]/80 backdrop-blur-sm rounded-[2.5rem] shadow-sm border p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 shrink-0 ${status === AppStatus.ERROR ? 'border-red-200 shadow-red-50' : 'border-[#E8E2D6]'}`}>
               <Visualizer status={status} audioContext={audioContextRef.current.input} />
               
               <div className="text-center mt-6 z-10">
                 <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
                   <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-bold border uppercase tracking-tight ${status === AppStatus.RECONNECTING ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-[#6B8E6B]/10 text-[#6B8E6B] border-[#6B8E6B]/20'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${status === AppStatus.RECONNECTING ? 'bg-orange-500' : 'bg-[#6B8E6B]'}`}></div>
-                    {status === AppStatus.RECONNECTING ? `尝试重连 (${retryCount}/${MAX_RETRIES})` : '全球免梯直连'}
+                    {status === AppStatus.RECONNECTING ? `尝试重连 (${retryCount}/${MAX_RETRIES})` : '全球免梯直连模式'}
                   </span>
                 </div>
-                <h2 className={`text-xl font-bold ${status === AppStatus.ERROR ? 'text-red-500' : 'text-[#4A5D4A]'}`}>
+                <h2 className={`text-xl font-bold transition-colors ${status === AppStatus.ERROR ? 'text-red-500' : 'text-[#4A5D4A]'}`}>
                   {status === AppStatus.IDLE && "准备好开口了吗？"}
                   {status === AppStatus.CONNECTING && "正在建立安全隧道..."}
                   {status === AppStatus.RECONNECTING && "正在修复连接..."}
-                  {status === AppStatus.ACTIVE && "精灵正在聆听并排队回答..."}
-                  {status === AppStatus.ERROR && "连接失败"}
+                  {status === AppStatus.ACTIVE && "精灵正在聆听..."}
+                  {status === AppStatus.ERROR && "连接建立失败"}
                 </h2>
-                <p className="text-[#8BA888] mt-2 text-xs font-medium px-4">
-                  {errorMessage ? errorMessage : (status === AppStatus.IDLE ? "点击下方按钮开启对话，Genie 会根据您选择的话题进行引导。" : "Genie 正在实时为你提供回答建议，看下方的卡片。")}
-                </p>
+                <div className="mt-3 px-4 max-w-xs mx-auto">
+                   <p className={`text-[11px] font-medium leading-relaxed transition-all ${status === AppStatus.ERROR ? 'text-red-500 bg-red-50 p-3 rounded-2xl border border-red-100 shadow-sm' : 'text-[#8BA888]'}`}>
+                    {errorMessage ? `诊断反馈: ${errorMessage}` : (status === AppStatus.IDLE ? "点击下方按钮开启对话，Genie 会根据您选择的话题进行引导。" : "Genie 正在通过云端节点进行握手，请保持网络稳定。")}
+                  </p>
+                </div>
               </div>
 
               {status === AppStatus.ACTIVE && (
