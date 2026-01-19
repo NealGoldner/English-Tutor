@@ -48,17 +48,26 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
   
-  try { await outputAudioContext.resume(); } catch (e) {}
+  // 关键修复：同时恢复输入和输出上下文，解决移动端无声问题
+  try { 
+    await Promise.all([
+      inputAudioContext.resume(),
+      outputAudioContext.resume()
+    ]);
+    console.log("AudioContext 已激活");
+  } catch (e) {
+    console.warn("AudioContext 激活失败:", e);
+  }
 
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("麦克风流已获取");
   } catch (e: any) {
     const msg = e.name === 'NotAllowedError' ? "请授权麦克风权限" : "麦克风启动失败";
     onError(msg);
     throw new Error(msg);
   }
 
-  // 使用代理模式初始化，防止浏览器端校验报错
   const ai = new GoogleGenAI({ 
     apiKey: process.env.API_KEY || 'PROXY_KEY',
     baseUrl: window.location.origin + '/api'
@@ -66,16 +75,21 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   
   const systemInstruction = `你是一位专业的双语英语导师 FluentGenie。话题: "${config.topic}"。请务必在每句英文后提供中文翻译。`;
 
+  console.log("正在通过安全隧道建立 WebSocket...");
+
   try {
     const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
+          console.log("WebSocket 通道已开启，流媒体传输启动");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
-            const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-            sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
+            if (currentSession) {
+              const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
+              sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
+            }
           };
           source.connect(scriptProcessor);
           scriptProcessor.connect(inputAudioContext!.destination);
@@ -96,8 +110,14 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             sources.add(source);
           }
         },
-        onerror: (e: any) => onError(`连接异常: ${e.message || '网络握手失败'}`),
-        onclose: () => onClose(false)
+        onerror: (e: any) => {
+          console.error("WebSocket 运行时错误:", e);
+          onError(`实时通话异常: ${e.message || '网络连接不稳定'}`);
+        },
+        onclose: () => {
+          console.log("会话已正常关闭");
+          onClose(false);
+        }
       },
       config: {
         responseModalities: [Modality.AUDIO],
@@ -108,10 +128,17 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       },
     });
 
-    currentSession = await sessionPromise;
+    // 延长超时时间到 25 秒，以应对跨国握手延迟
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("连接握手超时，请尝试切换网络环境（如切换 4G/5G 或 WiFi）")), 25000)
+    );
+
+    currentSession = await Promise.race([sessionPromise, timeoutPromise]);
+    console.log("握手成功，Genie 已就绪");
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    onError(`隧道连接失败: ${err.message}`);
+    console.error("连接建立过程被阻断:", err);
+    onError(err.message || "由于网络环境受限，无法建立安全连接。");
     throw err;
   }
 };

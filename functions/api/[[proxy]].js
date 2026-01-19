@@ -3,40 +3,47 @@ export async function onRequest(context) {
   const { request, params, env } = context;
   const url = new URL(request.url);
   
-  // 1. 解析目标路径 (例如从 /api/v1alpha/xxx 提取 v1alpha/xxx)
+  // 1. 构造目标 Google API URL
   const path = params.proxy ? params.proxy.join('/') : '';
   const googleUrl = new URL(`https://generativelanguage.googleapis.com/${path}${url.search}`);
 
-  // 2. 复制并修正请求头
+  // 2. 准备请求头
   const headers = new Headers(request.headers);
   headers.set('Host', 'generativelanguage.googleapis.com');
   
-  // 3. 核心补丁：如果前端传的是占位符或没传，后端自动注入真实的 Key
-  const authKey = headers.get('x-goog-api-key');
-  if (!authKey || authKey === 'PROXY_KEY' || authKey === 'API_KEY_PLACEHOLDER') {
-    if (env.API_KEY) {
+  // 3. 核心注入逻辑
+  const headerKey = headers.get('x-goog-api-key');
+  const urlKey = googleUrl.searchParams.get('key');
+  const isPlaceholder = (k) => !k || k === 'PROXY_KEY' || k === 'API_KEY_PLACEHOLDER' || k === 'undefined';
+
+  if (env.API_KEY) {
+    if (isPlaceholder(headerKey)) {
       headers.set('x-goog-api-key', env.API_KEY);
+    }
+    if (isPlaceholder(urlKey)) {
+      googleUrl.searchParams.set('key', env.API_KEY);
     }
   }
 
-  // 4. 特殊处理 WebSocket (Gemini Live 核心协议)
-  if (request.headers.get("Upgrade") === "websocket") {
-    // 手机端直连：直接 fetch 会自动处理 WebSocket 升级
-    return fetch(googleUrl.toString(), {
-      headers: headers
-    });
-  }
-
-  // 5. 处理普通 HTTP 请求 (TTS, 建议生成等)
+  // 4. 发起转发请求
   try {
+    // 处理 WebSocket 握手
+    const upgradeHeader = request.headers.get('Upgrade');
+    const isWebSocket = upgradeHeader && upgradeHeader.toLowerCase() === 'websocket';
+
     const response = await fetch(googleUrl.toString(), {
-      method: request.method,
+      method: isWebSocket ? 'GET' : request.method,
       headers: headers,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : null,
-      redirect: 'follow'
+      body: (request.method !== 'GET' && request.method !== 'HEAD' && !isWebSocket) ? request.body : null,
+      redirect: 'manual'
     });
 
-    // 6. 注入跨域头
+    // 5. 握手响应
+    if (response.status === 101) {
+      return response;
+    }
+
+    // 6. 普通响应处理与 CORS
     const newRes = new Response(response.body, response);
     newRes.headers.set('Access-Control-Allow-Origin', '*');
     newRes.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -44,7 +51,12 @@ export async function onRequest(context) {
     
     return newRes;
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Proxy Failed", message: err.message }), { 
+    console.error("Tunnel Error:", err);
+    return new Response(JSON.stringify({ 
+      error: "Secure Tunnel Interrupted", 
+      message: err.message,
+      hint: "请尝试刷新页面或更换网络接入点"
+    }), { 
       status: 502,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
