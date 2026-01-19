@@ -9,12 +9,14 @@ let currentStream: MediaStream | null = null;
 let nextStartTime = 0;
 const sources = new Set<AudioBufferSourceNode>();
 
+// Manual base64 encoding implementation as required by guidelines
 function encode(bytes: Uint8Array) {
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
+// Manual base64 decoding implementation as required by guidelines
 function decode(base64: string) {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
@@ -22,6 +24,7 @@ function decode(base64: string) {
   return bytes;
 }
 
+// Manual PCM audio decoding for raw stream as required by guidelines
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
@@ -48,6 +51,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   stopLiveSession();
   nextStartTime = 0;
 
+  // 1. 初始化音频环境
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
@@ -55,44 +59,42 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e: any) {
-    onError("无法获取麦克风。请确保已授权并使用 HTTPS 访问。");
+    onError("麦克风权限被拒绝", "请确保已开启麦克风权限并使用 HTTPS 环境。");
     throw e;
   }
 
-  // 严格按需初始化 SDK
-  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') ? process.env.API_KEY : 'PROXY_KEY';
-  const ai = new GoogleGenAI({ 
-    apiKey: apiKey,
-    baseUrl: `${window.location.origin}/api`
-  } as any);
+  // 2. Initialize GoogleGenAI instance using process.env.API_KEY directly
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const personalityPrompts: Record<string, string> = {
-    '幽默达人': "幽默、爱开玩笑。每一句英文回复后必须紧跟中文翻译。",
-    '电影编剧': "富有戏剧性。每一句英文回复后必须紧跟中文翻译。",
-    '严厉教官': "严格纠正语法错误。每一句英文回复后必须紧跟中文翻译。"
+  const personalityMap: Record<string, string> = {
+    '幽默达人': "You are super funny. Translation is REQUIRED.",
+    '电影编剧': "You are dramatic. Translation is REQUIRED.",
+    '严厉教官': "You are strict. Translation is REQUIRED."
   };
 
   const systemInstruction = `
-    Identity: FluentGenie (${personalityPrompts[config.personality]})
-    Task: Practice "${config.topic}" with user. Level: ${config.difficulty}.
-    Rules: 
-    1. Short responses.
-    2. MANDATORY Chinese translation after EVERY English sentence.
+    Role: English Tutor FluentGenie.
+    Personality: ${personalityMap[config.personality || '幽默达人']}
+    Topic: "${config.topic}".
+    RULE: Follow EVERY English sentence with its Chinese translation. NO EXCEPTIONS.
+    Keep it a natural, spoken conversation.
   `.trim();
 
   try {
+    // 3. Establish Live session connection
     const sessionPromise = ai.live.connect({
-      // 使用最稳定的原生语音预览模型
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("Channel established.");
+          console.log("WebSocket opened.");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
-            if (!currentSession) return;
+            // CRITICAL: Always use the sessionPromise to send data to prevent race conditions and stale closures
             const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-            sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
+            sessionPromise.then(session => {
+              session.sendRealtimeInput({ media: pcmBlob });
+            });
           };
           source.connect(scriptProcessor);
           scriptProcessor.connect(inputAudioContext!.destination);
@@ -108,6 +110,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             const source = outputAudioContext.createBufferSource();
             source.buffer = buffer;
             source.connect(outputAudioContext.destination);
+            // Gapless playback scheduling
             source.start(nextStartTime);
             nextStartTime += buffer.duration;
             sources.add(source);
@@ -115,15 +118,18 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          const reason = e.reason || e.message || "Connection refused by server.";
-          console.error("Session Socket Error:", e);
-          if (reason.includes("not implemented")) {
-            onError("该 API 在您的 API Key 所属项目中未启用或不受支持。", "MODEL_NOT_READY");
+          console.error("Gemini Live Error:", e);
+          const msg = e.reason || e.message || "WebSocket Error";
+          if (msg.includes("not implemented")) {
+            onError("API 未启用", "当前 API Key 所在的地区或项目未启用 Live API 功能。");
           } else {
-            onError("连接意外中断。请检查网络代理是否畅通。", reason);
+            onError("通话意外中断", msg);
           }
         },
-        onclose: () => { onClose(); }
+        onclose: () => { 
+          console.log("WebSocket closed.");
+          onClose(); 
+        }
       },
       config: {
         responseModalities: [Modality.AUDIO],
@@ -135,9 +141,9 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     });
 
     currentSession = await sessionPromise;
-    return { inputContext: inputAudioContext, outputContext: outputAudioContext };
+    return { outputContext: outputAudioContext };
   } catch (err: any) {
-    onError("建立连接失败。建议更换网络或检查 API Key。", err.message);
+    onError("初始化会话失败", err.message);
     throw err;
   }
 };

@@ -13,6 +13,13 @@ export interface TranscriptionEntry {
   timestamp: number;
 }
 
+// Added TopicResource interface to fix missing member error in suggestionService.ts
+export interface TopicResource {
+  phrase: string;
+  translation: string;
+  category: string;
+}
+
 export interface TutorConfig {
   topic: string;
   difficulty: '入门' | '进阶' | '专业';
@@ -29,11 +36,5 @@ export const TUTOR_TOPICS = [
   "餐厅点餐",
   "学术讨论",
   "商务会议",
-  "看图说话（开启相机）"
+  "看图说话"
 ];
-
-export interface TopicResource {
-  phrase: string;
-  translation: string;
-  category: '继续追问' | '情绪回应' | '地道俚语';
-}

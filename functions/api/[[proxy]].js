@@ -3,12 +3,26 @@ export async function onRequest(context) {
   const { request, params, env } = context;
   const url = new URL(request.url);
   
-  // 1. 构建 Google 端点 URL
+  // 1. 获取路径
   const path = params.proxy ? params.proxy.join('/') : '';
-  // 强制使用 v1alpha 端点，它目前对 Live/Bidi 支持最完整
-  const targetUrl = new URL(`https://generativelanguage.googleapis.com/${path}${url.search}`);
+  
+  // 关键修复：Live API 目前在 v1alpha 上最稳定。
+  // 我们将所有请求强制映射到 Google 的 v1alpha 端点。
+  let targetPath = path;
+  if (!path.startsWith('v1alpha') && !path.startsWith('v1beta')) {
+    targetPath = `v1alpha/${path}`;
+  }
 
-  // 2. 处理跨域预检
+  const googleUrl = new URL(`https://generativelanguage.googleapis.com/${targetPath}${url.search}`);
+
+  // 2. 注入 API Key
+  if (env.API_KEY) {
+    if (!googleUrl.searchParams.has('key')) {
+      googleUrl.searchParams.set('key', env.API_KEY);
+    }
+  }
+
+  // 3. 处理跨域预检
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       headers: {
@@ -20,58 +34,40 @@ export async function onRequest(context) {
     });
   }
 
-  // 3. 准备请求头
-  const headers = new Headers(request.headers);
-  headers.set('Host', 'generativelanguage.googleapis.com');
-  
-  // 注入 API Key
-  const apiKeyInHeader = headers.get('x-goog-api-key');
-  const apiKeyInUrl = targetUrl.searchParams.get('key');
-  
-  const isPlaceholder = (k) => !k || ['proxy_key', 'undefined', 'null'].includes(k.toLowerCase());
-
-  if (env.API_KEY) {
-    if (isPlaceholder(apiKeyInHeader)) headers.set('x-goog-api-key', env.API_KEY);
-    if (isPlaceholder(apiKeyInUrl)) targetUrl.searchParams.set('key', env.API_KEY);
+  // 4. WebSocket 升级处理
+  const upgradeHeader = request.headers.get('Upgrade');
+  if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
+    // 使用 fetch 直接转发，让底层平台处理 WebSocket 协议握手
+    return fetch(googleUrl.toString(), {
+      headers: request.headers,
+    });
   }
 
+  // 5. 常规 REST 请求转发
+  const headers = new Headers(request.headers);
+  headers.set('Host', 'generativelanguage.googleapis.com');
+
   try {
-    // 4. 处理 WebSocket (Live API 核心)
-    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      const response = await fetch(targetUrl.toString(), { headers });
-
-      if (response.status === 101) {
-        const [client, server] = new WebSocketPair();
-        const googleSocket = response.webSocket;
-        if (!googleSocket) throw new Error("No upstream WebSocket");
-        
-        googleSocket.accept();
-        server.accept();
-        
-        server.addEventListener('message', e => googleSocket.send(e.data));
-        googleSocket.addEventListener('message', e => server.send(e.data));
-        server.addEventListener('close', () => googleSocket.close());
-        googleSocket.addEventListener('close', () => server.close());
-
-        return new Response(null, { status: 101, webSocket: client });
-      }
-      
-      return response;
-    }
-
-    // 5. 常规 REST API 转发
-    const response = await fetch(targetUrl.toString(), {
+    const response = await fetch(googleUrl.toString(), {
       method: request.method,
       headers: headers,
       body: (request.method !== 'GET' && request.method !== 'HEAD') ? request.body : null,
       redirect: 'manual'
     });
 
-    const finalResponse = new Response(response.body, response);
-    finalResponse.headers.set('Access-Control-Allow-Origin', '*');
-    return finalResponse;
+    // 包装响应以支持 CORS
+    const newRes = new Response(response.body, response);
+    newRes.headers.set('Access-Control-Allow-Origin', '*');
+    newRes.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    newRes.headers.set('Access-Control-Allow-Headers', '*');
+    
+    return newRes;
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Proxy Error", message: err.message }), { 
+    return new Response(JSON.stringify({ 
+      error: "Gateway Proxy Error", 
+      message: err.message,
+      target: googleUrl.toString()
+    }), { 
       status: 502,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });

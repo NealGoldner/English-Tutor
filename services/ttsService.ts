@@ -1,12 +1,7 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// Standard client initialization using environment API key
-const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
-};
-
-// Manually implement base64 decoding as per guidelines
+// Manual base64 decoding as required by guidelines
 function decodeBase64(b64: string) {
   const binaryString = atob(b64);
   const len = binaryString.length;
@@ -17,7 +12,7 @@ function decodeBase64(b64: string) {
   return bytes;
 }
 
-// PCM decoding for raw audio following guidelines
+// Manual PCM audio decoding for raw PCM audio data
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
@@ -29,11 +24,12 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<Aud
 }
 
 export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
-  const ai = getAI();
+  // Always initialize with process.env.API_KEY directly
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `Read: ${text}` }] }],
+      contents: `Read: ${text}`,
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },

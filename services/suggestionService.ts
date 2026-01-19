@@ -2,17 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TranscriptionEntry, TopicResource } from "../types";
 
-const getAI = () => {
-  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') 
-    ? process.env.API_KEY 
-    : 'PROXY_KEY';
-    
-  return new GoogleGenAI({ 
-    apiKey: apiKey,
-    baseUrl: `${window.location.origin}/api`
-  } as any);
-};
-
+// Standard client initialization using environment API key exclusively
 export const generateLiveSuggestions = async (
   topic: string, 
   difficulty: string, 
@@ -21,7 +11,7 @@ export const generateLiveSuggestions = async (
 ): Promise<TopicResource[]> => {
   if (history.length === 0) return [];
 
-  const ai = getAI();
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // 仅取最后三轮对话，减小 Context 压力
   const context = history.slice(-3).map(m => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.text}`).join('\n');
@@ -37,9 +27,9 @@ export const generateLiveSuggestions = async (
 
   try {
     const response = await ai.models.generateContent({
-      // 关键优化：改用 Lite 模型，拥有独立且更宽的配额
+      // Using 'gemini-flash-lite-latest' for simple suggestion tasks as per model guidelines
       model: 'gemini-flash-lite-latest',
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -57,6 +47,7 @@ export const generateLiveSuggestions = async (
       }
     });
 
+    // Accessing text as a property on the GenerateContentResponse object
     const jsonStr = response.text?.trim();
     if (!jsonStr) return [];
     
