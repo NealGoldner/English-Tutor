@@ -3,7 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 
 const getAI = () => {
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
-  const aiConfig: any = { apiKey: process.env.API_KEY as string };
+  const apiKey = process.env.API_KEY || 'API_KEY_PLACEHOLDER';
+  const aiConfig: any = { apiKey };
   if (!isPreview) {
     aiConfig.baseUrl = `${window.location.origin}/api`;
   }
@@ -18,10 +19,10 @@ export const dictionaryAction = async (input: {
 }) => {
   const ai = getAI();
   const promptMap = {
-    translate: "你是一个专业的英汉词典。请翻译以下内容，如果是单词，请给出音标、详细释义、例句。内容：",
-    ocr: "请识别图片中的所有文字，并将其翻译成对应的中文。请列出重点词汇。",
-    handwriting: "这张图片里是我手写的文字，请识别它是什么，并给出中文释义。",
-    identify: "请识别图片中的物体，给出英文单词及发音提示。"
+    translate: "英汉词典。翻译并解析：",
+    ocr: "图片文字识别并翻译：",
+    handwriting: "手写识别并翻译：",
+    identify: "识别物体并给英文名："
   };
 
   const parts: any[] = [{ text: promptMap[input.mode] + (input.text || "") }];

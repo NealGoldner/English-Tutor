@@ -4,7 +4,8 @@ import { TranscriptionEntry, TopicResource } from "../types.ts";
 
 const getAI = () => {
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
-  const aiConfig: any = { apiKey: process.env.API_KEY as string };
+  const apiKey = process.env.API_KEY || 'API_KEY_PLACEHOLDER';
+  const aiConfig: any = { apiKey };
   if (!isPreview) {
     aiConfig.baseUrl = `${window.location.origin}/api`;
   }
@@ -21,21 +22,7 @@ export const generateLiveSuggestions = async (
   const ai = getAI();
   const lastMessages = history.slice(-3).map(m => `${m.role}: ${m.text}`).join('\n');
   
-  const prompt = `
-    You are an English conversation assistant. 
-    Topic: ${topic}
-    Difficulty Level: ${difficulty}
-    Recent Conversation:
-    ${lastMessages}
-
-    Based on the last message from the AI (model), provide 3 natural, short English responses for the user to continue the conversation smoothly.
-    - One simple response.
-    - One response that asks a follow-up question.
-    - One response using a common idiom or advanced phrase.
-    
-    Return ONLY a JSON array of objects with 'phrase', 'translation', and 'category'.
-    Category should be one of: '推荐回答', '追问引导', '地道表达'.
-  `;
+  const prompt = `Based on the English conversation about "${topic}", provide 3 short response options. JSON only.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -58,10 +45,8 @@ export const generateLiveSuggestions = async (
       }
     });
 
-    const text = response.text;
-    return JSON.parse(text || "[]");
+    return JSON.parse(response.text || "[]");
   } catch (err) {
-    console.error("Suggestion generation failed", err);
     return [];
   }
 };

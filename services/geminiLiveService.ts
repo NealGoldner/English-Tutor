@@ -69,51 +69,42 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   stopLiveSession();
   nextStartTime = 0;
 
-  // 1. 初始化音频上下文 (支持 iOS Safari)
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
   
-  // 关键：立即尝试 resume，这是移动端发声的前提
   try {
     await outputAudioContext.resume();
   } catch (e) {
     console.warn("AudioContext resume failed", e);
   }
 
-  // 2. 获取麦克风权限
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        sampleRate: 16000
-      } 
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 } 
     });
   } catch (e: any) {
-    const err = e.name === 'NotAllowedError' ? "权限限制：请在系统设置中允许浏览器访问麦克风。" : `麦克风初始化失败: ${e.message}`;
+    const err = e.name === 'NotAllowedError' ? "权限限制：请允许麦克风访问。" : `硬件错误: ${e.message}`;
     onError(err);
     throw new Error(err);
   }
 
-  // 3. 配置 AI
+  // 关键修复：如果 process.env.API_KEY 为空，传入占位符，由 Proxy 后端补齐
+  const apiKey = process.env.API_KEY || 'API_KEY_PLACEHOLDER';
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
-  const aiConfig: any = { apiKey: process.env.API_KEY as string };
+  
+  const aiConfig: any = { apiKey };
   if (!isPreview) {
-    // 强制使用本地 Cloudflare Proxy 节点
     aiConfig.baseUrl = `${window.location.origin}/api`;
   }
 
   const ai = new GoogleGenAI(aiConfig);
   
   const systemInstruction = `
-    你是一位极具耐心且专业的双语英语导师 FluentGenie。
+    你是一位极具耐心且专业的双语英语导师 FluentGenie。话题: "${config.topic}"。
     交互规则:
     1. 务必在每句英文后提供括号包裹的中文翻译。
-    2. 温柔倾听，排队回答。
-    3. 如果用户正在练习 "${config.topic}"，请围绕该话题展开，难度设定为 "${config.difficulty}"。
+    2. 如果检测到错误，请先鼓励再温柔纠正。
   `;
 
   try {
@@ -121,7 +112,6 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("WebSocket Tunnel Opened");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
@@ -156,16 +146,9 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          console.error("Gemini Session Error:", e);
-          const detail = e.message || "握手协议被拦截";
-          onError(`云端隧道异常: ${detail} (请检查是否开启了省流量模式)`);
+          onError(`云隧道异常: ${e.message || '握手协议冲突'}`);
         },
         onclose: (e: any) => {
-          console.log("Gemini Session Closed:", e);
-          // 1006 通常是网络中断或代理被墙
-          if (e.code === 1006) {
-            onError("连接被网络服务商重置 (Error 1006)，尝试自动修复中...");
-          }
           onClose(false);
         }
       },
@@ -183,8 +166,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    const errorMsg = err.message?.includes('403') ? "403 Forbidden: API密钥校验失败或地区受限。" : `握手失败: ${err.message}`;
-    onError(errorMsg);
+    onError(`握手失败: ${err.message || '代理节点无响应'}`);
     throw err;
   }
 };
@@ -196,9 +178,7 @@ export const stopLiveSession = () => {
     if (inputAudioContext) inputAudioContext.close();
     if (outputAudioContext) outputAudioContext.close();
     if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-    try {
-      currentSession.close();
-    } catch(e) {}
+    try { currentSession.close(); } catch(e) {}
     currentSession = null;
     inputAudioContext = null;
     outputAudioContext = null;
