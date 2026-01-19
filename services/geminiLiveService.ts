@@ -66,9 +66,7 @@ interface StartSessionOptions {
 }
 
 export const startLiveSession = async ({ config, onTranscription, onClose, onError }: StartSessionOptions) => {
-  // 清理现有资源
   stopLiveSession();
-
   nextStartTime = 0;
 
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
@@ -98,14 +96,15 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   
   const systemInstruction = `
     你是一位极具耐心且专业的双语英语导师 FluentGenie。
-    当前话题: ${config.topic}。 
-    难度等级: ${config.difficulty}。
     
+    核心性格: 
+    温和、循循善诱，即使被中断也会礼貌地完成当前的表达再回应。
+
     交互规则:
     1. 务必在每句英文后提供括号包裹的中文翻译。
-    2. 如果用户超过10秒没有说话，请主动用英文询问用户是否还在，并尝试提供一个新的话题切入点。
-    3. 保持会话持续活跃，不要主动结束对话。
-    4. 实时纠正用户的语法错误，但要以鼓励的方式进行。
+    2. 如果用户在你说完前插话，不要停下。继续完成你当前的句子，稍后再回答用户的问题。
+    3. 如果用户超过10秒没有说话，请主动询问。
+    4. 纠正语法时要温柔，多用 "You could say..." 或 "A more natural way is..."。
   `;
 
   const sessionPromise = ai.live.connect({
@@ -137,7 +136,9 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
             await outputAudioContext.resume();
           }
 
+          // 核心改进：nextStartTime 始终累加，不再重置，实现音频排队
           nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
+          
           const audioBuffer = await decodeAudioData(
             decode(base64EncodedAudioString),
             outputAudioContext,
@@ -157,20 +158,18 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           sources.add(source);
         }
 
+        // 核心改进：收到 interrupted 信号时，不再 stop sources
+        // 这允许已经下载的音频继续播放，而模型新生成的音频会追加到 nextStartTime 之后
         if (message.serverContent?.interrupted) {
-          sources.forEach(s => { try { s.stop(); } catch(e){} });
-          sources.clear();
-          nextStartTime = 0;
+          console.log("检测到用户插话，AI 将在完成当前表达后回应。");
+          // 这里我们什么都不做，让播放队列自然延续
         }
       },
       onerror: (e) => {
         console.error("Live Session Error:", e);
         onError(e);
       },
-      onclose: () => {
-        // 通知 App 组件会话已关闭
-        onClose(false); 
-      }
+      onclose: () => onClose(false)
     },
     config: {
       responseModalities: [Modality.AUDIO],
@@ -201,6 +200,7 @@ export const stopLiveSession = () => {
     inputAudioContext = null;
     outputAudioContext = null;
     currentStream = null;
+    nextStartTime = 0;
   }
 };
 

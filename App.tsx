@@ -72,7 +72,6 @@ const App: React.FC = () => {
         config,
         onTranscription: handleTranscription,
         onClose: (wasIntentional) => {
-          // 如果是非主动断开，且当前状态是 ACTIVE，则尝试重连
           if (!wasIntentional && statusRef.current === AppStatus.ACTIVE) {
             handleAutoRetry();
           } else if (statusRef.current !== AppStatus.RECONNECTING) {
@@ -86,7 +85,7 @@ const App: React.FC = () => {
       });
       audioContextRef.current = { input: inputContext, output: outputContext };
       setStatus(AppStatus.ACTIVE);
-      setRetryCount(0); // 重置重试计数
+      setRetryCount(0);
     } catch (error) {
       console.error("Failed to start session:", error);
       if (isRetry) {
@@ -100,7 +99,6 @@ const App: React.FC = () => {
   const handleAutoRetry = () => {
     if (retryCount < MAX_RETRIES) {
       setRetryCount(prev => prev + 1);
-      console.log(`Attempting reconnect... (${retryCount + 1}/${MAX_RETRIES})`);
       setTimeout(() => initiateSession(true), 1500);
     } else {
       setStatus(AppStatus.ERROR);
@@ -163,20 +161,19 @@ const App: React.FC = () => {
                 <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
                   <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-bold border uppercase tracking-tight ${status === AppStatus.RECONNECTING ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-[#6B8E6B]/10 text-[#6B8E6B] border-[#6B8E6B]/20'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${status === AppStatus.RECONNECTING ? 'bg-orange-500' : 'bg-[#6B8E6B]'}`}></div>
-                    {status === AppStatus.RECONNECTING ? `自动重连中 (${retryCount}/${MAX_RETRIES})` : '人声增强模式'}
+                    {status === AppStatus.RECONNECTING ? `自动重连中 (${retryCount}/${MAX_RETRIES})` : '无缝排队模式已启用'}
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-[#4A5D4A]">
                   {status === AppStatus.IDLE && "准备好开口了吗？"}
                   {status === AppStatus.CONNECTING && "正在接入免梯节点..."}
                   {status === AppStatus.RECONNECTING && "连接抖动，修复中..."}
-                  {status === AppStatus.ACTIVE && "精灵正在聆听..."}
+                  {status === AppStatus.ACTIVE && "精灵正在聆听并排队回答..."}
                   {status === AppStatus.ERROR && "连接暂时中断"}
                 </h2>
                 <p className="text-[#8BA888] mt-2 text-xs font-medium px-4">
                   {status === AppStatus.IDLE && "我们的代理已为您打通网络，直接对话即可。"}
-                  {status === AppStatus.RECONNECTING && "请稍等片刻，我们正在尝试找回您的导师。"}
-                  {status === AppStatus.ACTIVE && (config.showTranscription ? "文字流同步中..." : "纯听力挑战模式：专注于声音")}
+                  {status === AppStatus.ACTIVE && "支持插话：Genie 会听完你说的话并随后回答。"}
                 </p>
               </div>
 
@@ -198,7 +195,7 @@ const App: React.FC = () => {
               <div className="p-4 border-b border-[#E8E2D6] bg-white/50 flex items-center justify-between">
                 <h3 className="font-bold text-[#4A5D4A] flex items-center gap-2 text-sm">
                   <span className="w-1.5 h-1.5 bg-[#6B8E6B] rounded-full"></span>
-                  即时反馈
+                  实时流
                 </h3>
               </div>
               <TranscriptionView 
