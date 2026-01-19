@@ -12,7 +12,8 @@ const Visualizer: React.FC<VisualizerProps> = ({ status, audioContext }) => {
   const animationRef = useRef<number>();
 
   useEffect(() => {
-    const isWorking = status === AppStatus.ACTIVE || status === AppStatus.RECONNECTING;
+    // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
+    const isWorking = status === AppStatus.ACTIVE || status === AppStatus.CONNECTING;
     if (!isWorking || !audioContext) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       return;
@@ -32,7 +33,8 @@ const Visualizer: React.FC<VisualizerProps> = ({ status, audioContext }) => {
       const centerY = height / 2;
       const baseRadius = 60;
       
-      const mainColor = status === AppStatus.RECONNECTING ? '249, 115, 22' : '107, 142, 107'; // 橙色 vs 绿色
+      // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
+      const mainColor = status === AppStatus.CONNECTING ? '249, 115, 22' : '107, 142, 107'; // 橙色 vs 绿色
       
       // 多层脉冲
       for (let i = 0; i < 4; i++) {

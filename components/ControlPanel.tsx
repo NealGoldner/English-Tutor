@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React;
 import { AppStatus, TutorConfig, TUTOR_TOPICS, TranscriptionEntry } from '../types.ts';
 
 interface ControlPanelProps {
@@ -18,14 +18,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onStart, 
   onStop,
 }) => {
-  const isConnecting = status === AppStatus.CONNECTING || status === AppStatus.RECONNECTING;
+  // Fix: AppStatus.RECONNECTING does not exist, using AppStatus.CONNECTING
+  const isConnecting = status === AppStatus.CONNECTING;
   const isActive = status === AppStatus.ACTIVE;
 
   return (
     <div className="bg-[#FFFFFF]/90 backdrop-blur-2xl border-t border-[#E8E2D6] p-4 pb-8 md:p-8 sticky bottom-0 shadow-[0_-15px_40px_rgba(74,93,74,0.08)] z-50 rounded-t-[2.5rem]">
       <div className="max-w-3xl mx-auto flex flex-col gap-6">
         
-        {(!isActive && status !== AppStatus.RECONNECTING) && (
+        {/* Fix: AppStatus.RECONNECTING does not exist, simplifying condition to hide config when active or connecting */}
+        {(!isActive && !isConnecting) && (
           <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* 顶层：性格选择器 - 新增 */}
             <div className="flex flex-col gap-2">
@@ -87,14 +89,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         )}
 
         <div className="flex gap-4">
-          {(isActive || status === AppStatus.RECONNECTING) ? (
+          {/* Fix: AppStatus.RECONNECTING does not exist, simplifying condition to show stop button when active */}
+          {isActive ? (
             <button 
               onClick={onStop}
               className="group flex-1 bg-[#E38B7D] hover:bg-[#D47A6C] text-white font-bold py-7 rounded-[2rem] shadow-xl shadow-[#E38B7D]/20 flex flex-col items-center justify-center gap-1 transition-all transform active:scale-[0.96]"
             >
               <span className="flex items-center gap-2 text-lg">
                 <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
-                {status === AppStatus.RECONNECTING ? "停止并退出重连" : "结束本次有趣的交流"}
+                结束本次有趣的交流
               </span>
             </button>
           ) : (

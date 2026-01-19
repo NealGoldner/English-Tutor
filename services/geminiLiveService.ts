@@ -11,16 +11,14 @@ const sources = new Set<AudioBufferSourceNode>();
 
 function encode(bytes: Uint8Array) {
   let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) { binary += String.fromCharCode(bytes[i]); }
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
 function decode(base64: string) {
   const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); }
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
   return bytes;
 }
 
@@ -39,7 +37,7 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
 
 function createBlob(data: Float32Array): Blob {
   const int16 = new Int16Array(data.length);
-  for (let i = 0; i < data.length; i++) { int16[i] = data[i] * 32768; }
+  for (let i = 0; i < data.length; i++) int16[i] = data[i] * 32768;
   return { 
     data: encode(new Uint8Array(int16.buffer)), 
     mimeType: 'audio/pcm;rate=16000' 
@@ -54,69 +52,54 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   inputAudioContext = new AudioCtx({ sampleRate: 16000 });
   outputAudioContext = new AudioCtx({ sampleRate: 24000 });
   
-  try { 
-    await Promise.all([inputAudioContext.resume(), outputAudioContext.resume()]);
-  } catch (e) { console.warn("Audio system start delayed", e); }
-
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e: any) {
-    const msg = e.name === 'NotAllowedError' ? "请在浏览器设置中允许麦克风访问。" : "麦克风初始化失败。";
-    onError(msg);
-    throw new Error(msg);
+    onError("无法获取麦克风。请确保已授权并使用 HTTPS 访问。");
+    throw e;
   }
 
-  // 使用 PROXY_KEY 作为通用占位符，匹配后端 [[proxy]].js 的判断
-  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') 
-    ? process.env.API_KEY 
-    : 'PROXY_KEY';
-
+  // 严格按需初始化 SDK
+  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') ? process.env.API_KEY : 'PROXY_KEY';
   const ai = new GoogleGenAI({ 
     apiKey: apiKey,
-    // 将 API 根路径指向本地代理，解决国内直连问题
     baseUrl: `${window.location.origin}/api`
   } as any);
   
   const personalityPrompts: Record<string, string> = {
-    '幽默达人': "你是一个极具幽默感的导师。每一句英文回复后必须紧跟中文翻译。",
-    '电影编剧': "你是一个富有戏剧张力的编剧。每一句英文回复后必须紧跟中文翻译。",
-    '严厉教官': "你是一个极其严格的英语教官，注重语法纠错。每一句英文回复后必须紧跟中文翻译。"
+    '幽默达人': "幽默、爱开玩笑。每一句英文回复后必须紧跟中文翻译。",
+    '电影编剧': "富有戏剧性。每一句英文回复后必须紧跟中文翻译。",
+    '严厉教官': "严格纠正语法错误。每一句英文回复后必须紧跟中文翻译。"
   };
 
   const systemInstruction = `
-    Identity: FluentGenie (${personalityPrompts[config.personality || '幽默达人']})
-    Topic: "${config.topic}". Learner Level: ${config.difficulty}.
+    Identity: FluentGenie (${personalityPrompts[config.personality]})
+    Task: Practice "${config.topic}" with user. Level: ${config.difficulty}.
     Rules: 
-    1. ALWAYS provide Chinese translation after every English sentence.
-    2. Respond with SHORT sentences to encourage user interaction.
+    1. Short responses.
+    2. MANDATORY Chinese translation after EVERY English sentence.
   `.trim();
 
   try {
     const sessionPromise = ai.live.connect({
+      // 使用最稳定的原生语音预览模型
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("Connected to proxy gateway.");
+          console.log("Channel established.");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
             if (!currentSession) return;
-            const inputData = e.inputBuffer.getChannelData(0);
-            const pcmBlob = createBlob(inputData);
-            sessionPromise.then(session => {
-              if (session) session.sendRealtimeInput({ media: pcmBlob });
-            });
+            const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
+            sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
           };
           source.connect(scriptProcessor);
           scriptProcessor.connect(inputAudioContext!.destination);
         },
         onmessage: async (message: LiveServerMessage) => {
-          if (message.serverContent?.outputTranscription) {
-            onTranscription('model', message.serverContent.outputTranscription.text);
-          }
-          if (message.serverContent?.inputTranscription) {
-            onTranscription('user', message.serverContent.inputTranscription.text);
-          }
+          if (message.serverContent?.outputTranscription) onTranscription('model', message.serverContent.outputTranscription.text);
+          if (message.serverContent?.inputTranscription) onTranscription('user', message.serverContent.inputTranscription.text);
 
           const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
           if (base64Audio && outputAudioContext) {
@@ -132,20 +115,15 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          console.error("Live Stream Error:", e);
-          const msg = e.message?.toLowerCase() || "";
-          if (msg.includes('429') || msg.includes('quota')) {
-            onError("当前线路拥挤（429）。正在排队重连，请稍候...");
-          } else if (msg.includes('key')) {
-            onError("API Key 无效。请检查环境变量设置。");
+          const reason = e.reason || e.message || "Connection refused by server.";
+          console.error("Session Socket Error:", e);
+          if (reason.includes("not implemented")) {
+            onError("该 API 在您的 API Key 所属项目中未启用或不受支持。", "MODEL_NOT_READY");
           } else {
-            onError("连接中断：请确保您的网络环境可以访问代理网关。");
+            onError("连接意外中断。请检查网络代理是否畅通。", reason);
           }
         },
-        onclose: (e: any) => {
-          console.log("Session Closed", e);
-          onClose();
-        }
+        onclose: () => { onClose(); }
       },
       config: {
         responseModalities: [Modality.AUDIO],
@@ -159,7 +137,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    onError(err.message || "无法建立语音通道。");
+    onError("建立连接失败。建议更换网络或检查 API Key。", err.message);
     throw err;
   }
 };
