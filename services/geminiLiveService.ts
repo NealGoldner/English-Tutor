@@ -58,8 +58,11 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     throw new Error(msg);
   }
 
-  // Use process.env.API_KEY directly and remove invalid baseUrl property to fix TypeScript error
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // 使用代理模式初始化，防止浏览器端校验报错
+  const ai = new GoogleGenAI({ 
+    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    baseUrl: window.location.origin + '/api'
+  } as any);
   
   const systemInstruction = `你是一位专业的双语英语导师 FluentGenie。话题: "${config.topic}"。请务必在每句英文后提供中文翻译。`;
 
@@ -72,7 +75,6 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
             const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-            // Correctly chaining sendRealtimeInput to resolve session promise
             sessionPromise.then(s => s?.sendRealtimeInput({ media: pcmBlob }));
           };
           source.connect(scriptProcessor);

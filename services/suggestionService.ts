@@ -3,7 +3,10 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { TranscriptionEntry, TopicResource } from "../types.ts";
 
 const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ 
+    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    baseUrl: window.location.origin + '/api'
+  } as any);
 };
 
 export const generateLiveSuggestions = async (
@@ -63,7 +66,6 @@ export const generateLiveSuggestions = async (
     const text = response.text;
     if (!text) return [];
     
-    // 清理可能存在的 markdown 代码块标记
     const cleanedJson = text.replace(/```json|```/g, "").trim();
     return JSON.parse(cleanedJson);
   } catch (err) {

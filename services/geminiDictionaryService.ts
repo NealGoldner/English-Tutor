@@ -2,8 +2,10 @@
 import { GoogleGenAI } from "@google/genai";
 
 const getAI = () => {
-  // Use process.env.API_KEY directly and remove invalid baseUrl property to fix TypeScript error
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ 
+    apiKey: process.env.API_KEY || 'PROXY_KEY',
+    baseUrl: window.location.origin + '/api'
+  } as any);
 };
 
 export const dictionaryAction = async (input: any) => {
