@@ -2,12 +2,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TranscriptionEntry, TopicResource } from "../types";
 
-// Always use {apiKey: process.env.API_KEY} for GoogleGenAI initialization.
-// Removed 'baseUrl' as it is not a recognized property in GoogleGenAIOptions.
 const getAI = () => {
+  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') 
+    ? process.env.API_KEY 
+    : 'EMPTY_KEY_USE_PROXY_INJECTION';
+    
   return new GoogleGenAI({ 
-    apiKey: process.env.API_KEY
-  });
+    apiKey: apiKey,
+    baseUrl: `${window.location.origin}/api`
+  } as any);
 };
 
 export const generateLiveSuggestions = async (
@@ -20,26 +23,24 @@ export const generateLiveSuggestions = async (
 
   const ai = getAI();
   
-  // 仅取最后 3 轮对话，减少上下文大小，加快生成速度
+  // 提取最后几轮对话作为背景
   const context = history.slice(-3).map(m => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.text}`).join('\n');
-  const lastTutorMessage = history.filter(h => h.role === 'model').slice(-1)[0]?.text || "";
   
   const prompt = `
-    As an English Coach, suggest 3 natural responses for the User.
-    Context: Topic "${topic}", Level "${difficulty}", History:
+    Based on the conversation context, provide 3 high-quality English response suggestions for the Learner.
+    Topic: "${topic}", Level: "${difficulty}"
+    History:
     ${context}
     
-    Last Tutor Message: "${lastTutorMessage}"
-    
     Rules:
-    1. Short, high-impact phrases.
-    2. Provide natural Chinese translations.
-    3. Category must be: 深层表达, 逻辑追问, or 地道俚语.
+    1. Return JSON array.
+    2. Category MUST be: '继续追问', '情绪回应', '地道俚语'.
+    3. Keep responses natural and very short.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      // 使用更快速、配额更宽的 Flash Lite 模型
+      // 使用 Flash Lite 模型：更省配额，响应极快
       model: 'gemini-flash-lite-latest',
       contents: [{ parts: [{ text: prompt }] }],
       config: {
@@ -64,8 +65,7 @@ export const generateLiveSuggestions = async (
     
     return JSON.parse(jsonStr);
   } catch (err: any) {
-    console.warn("Suggestion service error:", err);
-    // 如果是配额超限，向上抛出特定提示
+    console.warn("Suggestion fetch error:", err);
     if (err.message?.includes('429') || err.message?.includes('quota')) {
       throw new Error("QUOTA_LIMIT");
     }

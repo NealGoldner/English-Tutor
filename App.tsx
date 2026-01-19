@@ -34,12 +34,13 @@ const App: React.FC = () => {
 
   const [dynamicSuggestions, setDynamicSuggestions] = useState<any[]>([]);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+  const [autoSuggest, setAutoSuggest] = useState(true);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   const transcriptionsRef = useRef(transcriptions);
   const lastSuggestionRef = useRef<number>(0);
-  const reconnectCountRef = useRef(0);
+  const reconnectTimeoutRef = useRef<any>(null);
 
   useEffect(() => { transcriptionsRef.current = transcriptions; }, [transcriptions]);
 
@@ -78,23 +79,22 @@ const App: React.FC = () => {
         config,
         onTranscription: handleTranscription,
         onClose: () => {
-          if (reconnectCountRef.current < 3) {
-             setStatus(AppStatus.RECONNECTING);
-             setTimeout(handleStart, Math.pow(2, reconnectCountRef.current) * 1000);
-             reconnectCountRef.current++;
-          } else {
-             setStatus(AppStatus.IDLE);
-             reconnectCountRef.current = 0;
-          }
+          if (status !== AppStatus.ERROR) setStatus(AppStatus.IDLE);
         },
         onError: (msg: string) => {
           setError(msg);
           setStatus(AppStatus.ERROR);
+          // 如果是配额错误，10秒后自动尝试重连
+          if (msg.includes('配额') || msg.includes('429')) {
+             if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+             reconnectTimeoutRef.current = setTimeout(() => {
+                if (status === AppStatus.ERROR) handleStart();
+             }, 10000);
+          }
         }
       });
       setAudioContexts(contexts);
       setStatus(AppStatus.ACTIVE);
-      reconnectCountRef.current = 0;
     } catch (err: any) {
       setError(err.message || "连接失败");
       setStatus(AppStatus.ERROR);
@@ -102,26 +102,24 @@ const App: React.FC = () => {
   };
 
   const handleStop = () => {
-    reconnectCountRef.current = 0;
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     stopLiveSession();
     setStatus(AppStatus.IDLE);
   };
 
-  const handleCapture = (base64: string) => {
-    sendImageFrame(base64);
-    setIsCameraOpen(false);
-  };
-
-  // 触发建议生成
   const triggerSuggestions = async () => {
     if (isGeneratingSuggestions) return;
     
     const currentLast = transcriptionsRef.current[transcriptionsRef.current.length - 1];
     if (!currentLast || currentLast.role !== 'model') return;
 
+    // 4秒冷却，防止刷爆配额
+    const now = Date.now();
+    if (now - lastSuggestionRef.current < 4000) return;
+
     setIsGeneratingSuggestions(true);
     setSuggestionError(null);
-    lastSuggestionRef.current = Date.now();
+    lastSuggestionRef.current = now;
     
     try {
       const suggestions = await generateLiveSuggestions(
@@ -135,27 +133,23 @@ const App: React.FC = () => {
       }
     } catch (e: any) {
       if (e.message === "QUOTA_LIMIT") {
-        setSuggestionError("API 配额超限，建议功能暂不可用");
+        setSuggestionError("配额已达上限");
       }
-      console.error("Suggestions update error:", e);
+      console.error("Suggestions error:", e);
     } finally {
       setIsGeneratingSuggestions(false);
     }
   };
 
   useEffect(() => {
-    if (status === AppStatus.ACTIVE && transcriptions.length > 0) {
+    if (autoSuggest && status === AppStatus.ACTIVE && transcriptions.length > 0) {
       const lastEntry = transcriptions[transcriptions.length - 1];
       if (lastEntry.role === 'model') {
-        const timer = setTimeout(() => {
-          const now = Date.now();
-          if (now - lastSuggestionRef.current < 5000) return;
-          triggerSuggestions();
-        }, 800); 
+        const timer = setTimeout(triggerSuggestions, 1500); 
         return () => clearTimeout(timer);
       }
     }
-  }, [transcriptions, status, config.topic, config.difficulty, config.personality]);
+  }, [transcriptions, status, autoSuggest]);
 
   return (
     <div className="min-h-screen bg-[#F9F7F2] text-[#4A5D4A] flex flex-col font-sans selection:bg-[#6B8E6B]/20 overflow-x-hidden">
@@ -192,17 +186,9 @@ const App: React.FC = () => {
                   {status === AppStatus.ERROR && error && (
                     <div className="absolute inset-0 flex items-center justify-center bg-red-50/90 backdrop-blur-md px-6 text-center z-10">
                       <div className="flex flex-col items-center">
-                        <span className="text-red-600 font-bold mb-1">通话中断</span>
+                        <span className="text-red-600 font-bold mb-1">系统繁忙或中断</span>
                         <p className="text-red-500 text-[10px] leading-relaxed max-w-[200px] mb-3">{error}</p>
-                        <button onClick={handleStart} className="px-4 py-1.5 bg-red-500 text-white rounded-full text-[10px] font-bold">重新连接</button>
-                      </div>
-                    </div>
-                  )}
-                  {status === AppStatus.RECONNECTING && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-[#F9F7F2]/80 backdrop-blur-md z-10">
-                      <div className="flex flex-col items-center">
-                        <div className="w-6 h-6 border-2 border-[#6B8E6B]/20 border-t-[#6B8E6B] rounded-full animate-spin mb-2"></div>
-                        <span className="text-[#6B8E6B] text-[10px] font-bold">正在自动重连...</span>
+                        <button onClick={handleStart} className="px-4 py-1.5 bg-red-500 text-white rounded-full text-[10px] font-bold">立即尝试重新连接</button>
                       </div>
                     </div>
                   )}
@@ -214,6 +200,8 @@ const App: React.FC = () => {
                   topic={config.topic} voice={config.voice} disabled={status === AppStatus.IDLE}
                   dynamicSuggestions={dynamicSuggestions} isGenerating={isGeneratingSuggestions}
                   error={suggestionError}
+                  autoSuggest={autoSuggest}
+                  onToggleAuto={() => setAutoSuggest(!autoSuggest)}
                   onManualRefresh={triggerSuggestions}
                 />
               </div>
@@ -224,7 +212,7 @@ const App: React.FC = () => {
         {mainMode === MainMode.DICTIONARY && <DictionarySection />}
         {mainMode === MainMode.HISTORY && <HistorySection />}
       </main>
-      {isCameraOpen && <CameraOverlay onCapture={handleCapture} onClose={() => setIsCameraOpen(false)} />}
+      {isCameraOpen && <CameraOverlay onCapture={(b) => { sendImageFrame(b); setIsCameraOpen(false); }} onClose={() => setIsCameraOpen(false)} />}
     </div>
   );
 };

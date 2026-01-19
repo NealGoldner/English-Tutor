@@ -9,12 +9,6 @@ let currentStream: MediaStream | null = null;
 let nextStartTime = 0;
 const sources = new Set<AudioBufferSourceNode>();
 
-// 自动检测运行环境，构建代理路径
-const getBaseUrl = () => {
-  const origin = window.location.origin;
-  return `${origin}/api`;
-};
-
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -62,34 +56,38 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
   
   try { 
     await Promise.all([inputAudioContext.resume(), outputAudioContext.resume()]);
-  } catch (e) { console.warn("音频启动受阻", e); }
+  } catch (e) { console.warn("音频系统启动失败", e); }
 
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e: any) {
-    const msg = e.name === 'NotAllowedError' ? "请授权麦克风权限。" : "无法访问麦克风。";
+    const msg = e.name === 'NotAllowedError' ? "请授予麦克风权限。" : "无法访问麦克风。";
     onError(msg);
     throw new Error(msg);
   }
 
-  // Always use {apiKey: process.env.API_KEY} for GoogleGenAI initialization.
-  // Removed 'baseUrl' as it is not a recognized property in GoogleGenAIOptions.
+  // 关键修复：确保 apiKey 永远不为空，避免 SDK 抛出 early error
+  const apiKey = (process.env.API_KEY && process.env.API_KEY !== 'undefined') 
+    ? process.env.API_KEY 
+    : 'EMPTY_KEY_USE_PROXY_INJECTION';
+
   const ai = new GoogleGenAI({ 
-    apiKey: process.env.API_KEY
-  });
+    apiKey: apiKey,
+    baseUrl: `${window.location.origin}/api`
+  } as any);
   
   const personalityPrompts: Record<string, string> = {
-    '幽默达人': "你是一个极具幽默感的英语导师，说话风趣。每一句英文回复后必须紧跟中文翻译。",
-    '电影编剧': "你是一个电影编剧，喜欢用戏剧化的场景练习。每一句英文回复后必须紧跟中文翻译。",
-    '严厉教官': "你是一个极其严格的英语教官，注重纠错。每一句英文回复后必须紧跟中文翻译。"
+    '幽默达人': "你是一个极其幽默的英语导师，擅长开玩笑。每一句英文回复后必须紧跟中文翻译。",
+    '电影编剧': "你是一个富有创造力的编剧，喜欢用戏剧化的方式交流。每一句英文回复后必须紧跟中文翻译。",
+    '严厉教官': "你是一个非常严格的英语教官，注重纠错。每一句英文回复后必须紧跟中文翻译。"
   };
 
   const systemInstruction = `
     Identity: FluentGenie (${personalityPrompts[config.personality || '幽默达人']})
     Current Topic: "${config.topic}". Level: ${config.difficulty}.
-    Mandatory Rules: 
+    Rules: 
     1. ALWAYS provide Chinese translation after every English sentence.
-    2. Respond briefly but engage the user with deep questions.
+    2. Keep responses short and engaging to encourage the user to speak.
   `.trim();
 
   try {
@@ -97,7 +95,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("Gemini Live Session Opened");
+          console.log("Connected to FluentGenie (Proxy Mode Active)");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
@@ -133,16 +131,18 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          console.error("Session Socket Error:", e);
-          const msg = e.message?.toLowerCase();
-          if (msg?.includes('quota') || msg?.includes('429')) {
-            onError("API 配额超限（429）。请检查 Google AI Studio 账单或稍后再试。");
+          console.error("Live Session Error:", e);
+          const msg = e.message?.toLowerCase() || "";
+          if (msg.includes('429') || msg.includes('quota')) {
+            onError("API 配额已满。系统将尝试在 10s 后自动重连...");
+          } else if (msg.includes('api key')) {
+            onError("API Key 验证失败，请确保您在 Cloudflare/Vercel 后端配置了 API_KEY。");
           } else {
-            onError("网络环境不稳定，正在尝试恢复...");
+            onError("网络连接不稳定，建议检查网络环境。");
           }
         },
         onclose: (e: any) => {
-          console.log("Session Socket Closed", e);
+          console.log("Session Closed", e);
           onClose();
         }
       },
@@ -158,8 +158,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    console.error("Session Connect Exception:", err);
-    onError(err.message || "无法连接到服务器，请检查网络设置。");
+    onError(err.message || "无法启动会话，请刷新重试。");
     throw err;
   }
 };
