@@ -2,13 +2,8 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
 const getAI = () => {
-  const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
-  const apiKey = process.env.API_KEY || 'API_KEY_PLACEHOLDER';
-  const aiConfig: any = { apiKey };
-  if (!isPreview) {
-    aiConfig.baseUrl = `${window.location.origin}/api`;
-  }
-  return new GoogleGenAI(aiConfig);
+  // Use process.env.API_KEY directly and remove invalid baseUrl property to fix TypeScript error
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
@@ -19,9 +14,7 @@ export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
       contents: [{ parts: [{ text: `Read: ${text}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-        },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
       },
     });
 
@@ -41,21 +34,17 @@ export const speakText = async (text: string, voiceName: string = 'Zephyr') => {
   }
 };
 
-function decodeBase64(base64: string) {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
+function decodeBase64(b64: string) {
+  const s = atob(b64);
+  const b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
 }
 
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < dataInt16.length; i++) {
-    channelData[i] = dataInt16[i] / 32768.0;
-  }
-  return buffer;
+  const d = new Int16Array(data.buffer);
+  const b = ctx.createBuffer(1, d.length, 24000);
+  const cd = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) cd[i] = d[i] / 32768.0;
+  return b;
 }

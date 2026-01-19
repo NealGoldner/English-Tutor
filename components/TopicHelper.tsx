@@ -25,15 +25,32 @@ const TopicHelper: React.FC<TopicHelperProps> = ({
     speakText(phrase, voice);
   };
 
+  // 类别颜色映射
+  const getCategoryStyle = (category: string) => {
+    switch (category) {
+      case '情绪回应': return 'bg-blue-100 text-blue-600';
+      case '继续追问': return 'bg-purple-100 text-purple-600';
+      case '深层表达': return 'bg-orange-100 text-orange-600';
+      case '破冰': return 'bg-green-100 text-green-600';
+      case '进阶': return 'bg-indigo-100 text-indigo-600';
+      default: return 'bg-gray-100 text-gray-600';
+    }
+  };
+
   return (
     <div className={`w-full transition-all duration-500 ${disabled ? 'opacity-40 grayscale pointer-events-none' : 'opacity-100'}`}>
       <div className="flex items-center justify-between mb-3 px-1">
         <h4 className="text-[10px] font-bold text-[#6B8E6B] uppercase tracking-[0.2em] flex items-center gap-2">
           <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-orange-400 animate-pulse' : 'bg-[#6B8E6B]'}`}></span>
-          {isLive ? '实时助攻 · 此时此刻你可以说' : `${topic} · 预设锦囊`}
+          {isLive ? '实时助攻 · 建议回复' : `${topic} · 预设锦囊`}
         </h4>
         {isGenerating && (
-          <span className="text-[9px] text-[#6B8E6B] font-bold animate-pulse">Genie 正在为你构思回答...</span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1 h-1 bg-[#6B8E6B] rounded-full animate-bounce"></div>
+            <div className="w-1 h-1 bg-[#6B8E6B] rounded-full animate-bounce [animation-delay:-.15s]"></div>
+            <div className="w-1 h-1 bg-[#6B8E6B] rounded-full animate-bounce [animation-delay:-.3s]"></div>
+            <span className="text-[9px] text-[#6B8E6B] font-bold ml-1">Genie 正在同步思考...</span>
+          </div>
         )}
       </div>
       
@@ -47,10 +64,7 @@ const TopicHelper: React.FC<TopicHelperProps> = ({
             }`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter ${
-                item.category === '破冰' || item.category === '推荐回答' ? 'bg-blue-100 text-blue-600' : 
-                item.category === '进阶' || item.category === '追问引导' ? 'bg-purple-100 text-purple-600' : 'bg-orange-100 text-orange-600'
-              }`}>
+              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter ${getCategoryStyle(item.category)}`}>
                 {item.category}
               </span>
               <div className="flex items-center gap-1">
@@ -65,8 +79,8 @@ const TopicHelper: React.FC<TopicHelperProps> = ({
           </button>
         ))}
         {resources.length === 0 && !isGenerating && (
-          <div className="flex-none w-full flex items-center justify-center text-[10px] text-[#8BA888] font-bold py-8">
-            等待对话开始以生成助攻建议...
+          <div className="flex-none w-full flex items-center justify-center text-[10px] text-[#8BA888] font-bold py-8 italic">
+            等待 Genie 开口以生成针对性建议...
           </div>
         )}
       </div>
