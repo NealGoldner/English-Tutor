@@ -4,43 +4,44 @@ import { TranscriptionEntry, TopicResource } from "../types";
 
 // Standard client initialization using environment API key
 const getAI = () => {
-  return new GoogleGenAI({ 
-    apiKey: process.env.API_KEY,
-    baseUrl: window.location.origin + '/api'
-  } as any);
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const generateLiveSuggestions = async (
   topic: string, 
   difficulty: string, 
+  personality: string,
   history: TranscriptionEntry[]
 ): Promise<TopicResource[]> => {
   if (history.length === 0) return [];
 
   const ai = getAI();
   
-  // Extract context from recent history
-  const context = history.slice(-6).map(m => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.text}`).join('\n');
+  // Extract recent conversation context
+  const context = history.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.text}`).join('\n');
+  const lastTutorMessage = history.filter(h => h.role === 'model').pop()?.text || "";
   
   const prompt = `
-    You are an expert English Tutor. Based on the conversation history below about the topic "${topic}", 
-    generate 3 high-quality, natural, and helpful response suggestions for the User to say next.
+    You are an Elite Language Coach. Your mission is to provide 3 "Killer Responses" for the User to use against their AI Tutor.
     
+    [CONTEXT]
+    Current Topic: ${topic}
     Current Proficiency Level: ${difficulty}
+    AI Tutor Personality: ${personality}
+    Last Tutor Message: "${lastTutorMessage}"
     
-    Rules for suggestions:
-    1. MUST be contextually relevant to the LAST message from the Tutor.
-    2. Provide 3 distinct types of responses:
-       - Type A: A natural reaction or emotional response (Category: "情绪回应")
-       - Type B: A follow-up question to keep the conversation going (Category: "继续追问")
-       - Type C: A more complex statement or personal opinion (Category: "深层表达")
-    3. Ensure the vocabulary and grammar match the "${difficulty}" level.
-    4. Provide a natural Chinese translation for each.
-    
-    Conversation History:
+    [FULL HISTORY]
     ${context}
     
-    Output MUST be JSON.
+    [STRICT RULES FOR SUGGESTIONS]
+    1. NO FLUFF: Strictly forbidden to use phrases like "I agree", "That's good", "Yes/No", "I don't know".
+    2. LOGICAL ALIGNMENT: The suggestion MUST directly address the points raised in the [Last Tutor Message].
+    3. ADVANCED VOCABULARY: Use collocations and idiomatic expressions suitable for "${difficulty}" level.
+    4. VARIETY:
+       - Response 1 (Analytical): A structured personal opinion starting with phrases like "From my perspective...", "One nuance to consider is..."
+       - Response 2 (Inquisitive): A deep follow-up question that challenges the Tutor's logic or asks for details.
+       - Response 3 (Native/Idiomatic): A very natural, colloquial expression an American/Brit would use in this specific scenario.
+    5. TRANSLATION: Chinese translations must be natural and capture the "vibe" or underlying intent.
   `;
 
   try {
@@ -54,9 +55,9 @@ export const generateLiveSuggestions = async (
           items: {
             type: Type.OBJECT,
             properties: {
-              phrase: { type: Type.STRING, description: "The English phrase suggested." },
-              translation: { type: Type.STRING, description: "Chinese translation." },
-              category: { type: Type.STRING, description: "One of: 情绪回应, 继续追问, 深层表达" }
+              phrase: { type: Type.STRING, description: "The sophisticated English response." },
+              translation: { type: Type.STRING, description: "Nuanced Chinese translation." },
+              category: { type: Type.STRING, description: "One of: 深层表达, 逻辑追问, 地道俚语" }
             },
             required: ["phrase", "translation", "category"]
           }
@@ -64,14 +65,12 @@ export const generateLiveSuggestions = async (
       }
     });
 
-    const text = response.text;
-    if (!text) return [];
+    const jsonStr = response.text?.trim();
+    if (!jsonStr) return [];
     
-    // Clean up markdown markers if the model includes them
-    const cleanedJson = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(cleanedJson);
+    return JSON.parse(jsonStr);
   } catch (err) {
-    console.error("Suggestion generation error:", err);
+    console.error("High-quality suggestion generation error:", err);
     return [];
   }
 };
