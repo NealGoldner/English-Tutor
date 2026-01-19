@@ -3,33 +3,45 @@ export async function onRequest(context) {
   const { request, params } = context;
   const url = new URL(request.url);
   
-  // 提取剩余路径，拼接 Google API 完整地址
+  // 提取路径并构建目标 URL
   const targetPath = params.proxy ? params.proxy.join('/') : '';
   const googleUrl = new URL(`https://generativelanguage.googleapis.com/${targetPath}${url.search}`);
 
-  // 处理 WebSocket 升级请求 (Gemini Live API)
+  // 必须重写 Headers，特别是 Host 字段
+  const newHeaders = new Headers(request.headers);
+  newHeaders.set('Host', 'generativelanguage.googleapis.com');
+  
+  // 移除可能导致冲突的 Cloudflare 特定头部
+  newHeaders.delete('cf-connecting-ip');
+  newHeaders.delete('cf-ipcountry');
+  newHeaders.delete('cf-ray');
+  newHeaders.delete('cf-visitor');
+
+  // 处理 WebSocket 升级请求
   if (request.headers.get("Upgrade") === "websocket") {
-    // Cloudflare fetch 能够透明地代理 WebSocket 连接
     return fetch(googleUrl.toString(), {
-      headers: request.headers,
+      headers: newHeaders,
     });
   }
 
   // 处理普通 REST 请求
   const newRequest = new Request(googleUrl.toString(), {
     method: request.method,
-    headers: request.headers,
-    body: request.body,
+    headers: newHeaders,
+    body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : null,
     redirect: 'follow'
   });
 
   try {
     const response = await fetch(newRequest);
-    // 复制响应并添加 CORS（如果需要，虽然同域不需要，但可以增加兼容性）
-    const newResponse = new Response(response.body, response);
-    newResponse.headers.set('Access-Control-Allow-Origin', '*');
-    return newResponse;
+    // 允许跨域
+    const res = new Response(response.body, response);
+    res.headers.set('Access-Control-Allow-Origin', '*');
+    return res;
   } catch (err) {
-    return new Response(`Proxy Error: ${err.message}`, { status: 500 });
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }

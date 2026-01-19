@@ -62,128 +62,122 @@ interface StartSessionOptions {
   config: TutorConfig;
   onTranscription: (role: 'user' | 'model', text: string) => void;
   onClose: (wasIntentional: boolean) => void;
-  onError: (error: any) => void;
+  onError: (error: string) => void;
 }
 
 export const startLiveSession = async ({ config, onTranscription, onClose, onError }: StartSessionOptions) => {
   stopLiveSession();
   nextStartTime = 0;
 
+  // 1. 初始化音频上下文 (必须在用户点击的回调内)
+  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+  inputAudioContext = new AudioCtx({ sampleRate: 16000 });
+  outputAudioContext = new AudioCtx({ sampleRate: 24000 });
+  
+  // 立即尝试恢复，确保移动端可用
+  if (outputAudioContext.state === 'suspended') {
+    await outputAudioContext.resume();
+  }
+
+  // 2. 获取麦克风权限
+  try {
+    currentStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 16000
+      } 
+    });
+  } catch (e) {
+    onError("无法获取麦克风权限，请检查系统设置。");
+    throw e;
+  }
+
+  // 3. 配置 AI
   const isPreview = window.location.hostname.includes('google.com') || window.location.hostname === 'localhost';
   const aiConfig: any = { apiKey: process.env.API_KEY as string };
   if (!isPreview) {
+    // 确保路径以 /api 开头
     aiConfig.baseUrl = `${window.location.origin}/api`;
   }
 
   const ai = new GoogleGenAI(aiConfig);
   
-  inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-  outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-  
-  if (outputAudioContext.state === 'suspended') {
-    await outputAudioContext.resume();
-  }
-
-  currentStream = await navigator.mediaDevices.getUserMedia({ 
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 1,
-      sampleRate: 16000
-    } 
-  });
-  
   const systemInstruction = `
     你是一位极具耐心且专业的双语英语导师 FluentGenie。
-    
-    核心性格: 
-    温和、循循善诱，即使被中断也会礼貌地完成当前的表达再回应。
-
     交互规则:
     1. 务必在每句英文后提供括号包裹的中文翻译。
-    2. 如果用户在你说完前插话，不要停下。继续完成你当前的句子，稍后再回答用户的问题。
-    3. 如果用户超过10秒没有说话，请主动询问。
-    4. 纠正语法时要温柔，多用 "You could say..." 或 "A more natural way is..."。
+    2. 温柔倾听，排队回答。
+    3. 纠正语法时要温柔。
   `;
 
-  const sessionPromise = ai.live.connect({
-    model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-    callbacks: {
-      onopen: () => {
-        const source = inputAudioContext!.createMediaStreamSource(currentStream!);
-        const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
-        scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-          const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-          const pcmBlob = createBlob(inputData);
-          sessionPromise.then((session) => {
-            if (session) session.sendRealtimeInput({ media: pcmBlob });
-          });
-        };
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(inputAudioContext!.destination);
-      },
-      onmessage: async (message: LiveServerMessage) => {
-        if (message.serverContent?.outputTranscription) {
-          onTranscription('model', message.serverContent.outputTranscription.text);
-        } else if (message.serverContent?.inputTranscription) {
-          onTranscription('user', message.serverContent.inputTranscription.text);
-        }
-
-        const base64EncodedAudioString = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-        if (base64EncodedAudioString && outputAudioContext) {
-          if (outputAudioContext.state === 'suspended') {
-            await outputAudioContext.resume();
+  try {
+    const sessionPromise = ai.live.connect({
+      model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+      callbacks: {
+        onopen: () => {
+          console.log("WebSocket Connection Opened");
+          const source = inputAudioContext!.createMediaStreamSource(currentStream!);
+          const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
+          scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
+            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+            const pcmBlob = createBlob(inputData);
+            sessionPromise.then((session) => {
+              if (session) session.sendRealtimeInput({ media: pcmBlob });
+            });
+          };
+          source.connect(scriptProcessor);
+          scriptProcessor.connect(inputAudioContext!.destination);
+        },
+        onmessage: async (message: LiveServerMessage) => {
+          if (message.serverContent?.outputTranscription) {
+            onTranscription('model', message.serverContent.outputTranscription.text);
+          } else if (message.serverContent?.inputTranscription) {
+            onTranscription('user', message.serverContent.inputTranscription.text);
           }
 
-          // 核心改进：nextStartTime 始终累加，不再重置，实现音频排队
-          nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
-          
-          const audioBuffer = await decodeAudioData(
-            decode(base64EncodedAudioString),
-            outputAudioContext,
-            24000,
-            1,
-          );
-          const source = outputAudioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(outputAudioContext.destination);
-          
-          source.onended = () => {
-            sources.delete(source);
-          };
+          const base64EncodedAudioString = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+          if (base64EncodedAudioString && outputAudioContext) {
+            if (outputAudioContext.state === 'suspended') {
+              await outputAudioContext.resume();
+            }
 
-          source.start(nextStartTime);
-          nextStartTime = nextStartTime + audioBuffer.duration;
-          sources.add(source);
-        }
+            nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
+            const audioBuffer = await decodeAudioData(decode(base64EncodedAudioString), outputAudioContext, 24000, 1);
+            const source = outputAudioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(outputAudioContext.destination);
+            source.onended = () => sources.delete(source);
+            source.start(nextStartTime);
+            nextStartTime = nextStartTime + audioBuffer.duration;
+            sources.add(source);
+          }
+        },
+        onerror: (e) => {
+          console.error("Session Error:", e);
+          onError("连接异常断开，可能是代理线路繁忙，请重试。");
+        },
+        onclose: () => onClose(false)
+      },
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voice } },
+        },
+        systemInstruction,
+        outputAudioTranscription: {},
+        inputAudioTranscription: {},
+      },
+    });
 
-        // 核心改进：收到 interrupted 信号时，不再 stop sources
-        // 这允许已经下载的音频继续播放，而模型新生成的音频会追加到 nextStartTime 之后
-        if (message.serverContent?.interrupted) {
-          console.log("检测到用户插话，AI 将在完成当前表达后回应。");
-          // 这里我们什么都不做，让播放队列自然延续
-        }
-      },
-      onerror: (e) => {
-        console.error("Live Session Error:", e);
-        onError(e);
-      },
-      onclose: () => onClose(false)
-    },
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: config.voice } },
-      },
-      systemInstruction,
-      outputAudioTranscription: {},
-      inputAudioTranscription: {},
-    },
-  });
-
-  currentSession = await sessionPromise;
-  return { inputContext: inputAudioContext, outputContext: outputAudioContext };
+    currentSession = await sessionPromise;
+    return { inputContext: inputAudioContext, outputContext: outputAudioContext };
+  } catch (err) {
+    onError(`初始化失败: ${err.message || '网络连接被重置'}`);
+    throw err;
+  }
 };
 
 export const stopLiveSession = () => {

@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { AppStatus, TranscriptionEntry, TutorConfig, MainMode } from './types.ts';
+import { AppStatus, TranscriptionEntry, TutorConfig, MainMode, TopicResource } from './types.ts';
 import Header from './components/Header.tsx';
 import ControlPanel from './components/ControlPanel.tsx';
 import TranscriptionView from './components/TranscriptionView.tsx';
@@ -8,12 +8,17 @@ import Visualizer from './components/Visualizer.tsx';
 import CameraOverlay from './components/CameraOverlay.tsx';
 import DictionarySection from './components/DictionarySection.tsx';
 import HistorySection from './components/HistorySection.tsx';
+import TopicHelper from './components/TopicHelper.tsx';
 import { startLiveSession, stopLiveSession, sendImageFrame } from './services/geminiLiveService.ts';
+import { generateLiveSuggestions } from './services/suggestionService.ts';
 
 const App: React.FC = () => {
   const [activeMode, setActiveMode] = useState<MainMode>(MainMode.PRACTICE);
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [transcriptions, setTranscriptions] = useState<TranscriptionEntry[]>([]);
+  const [liveSuggestions, setLiveSuggestions] = useState<TopicResource[]>([]);
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 3;
@@ -37,6 +42,38 @@ const App: React.FC = () => {
     statusRef.current = status;
   }, [status]);
 
+  // 实时建议生成逻辑
+  useEffect(() => {
+    if (status !== AppStatus.ACTIVE || transcriptions.length === 0) {
+      if (status === AppStatus.IDLE) setLiveSuggestions([]);
+      return;
+    }
+
+    const lastEntry = transcriptions[transcriptions.length - 1];
+    // 只有当模型说完话时才触发建议生成
+    if (lastEntry.role === 'model') {
+      const timer = setTimeout(async () => {
+        setIsGeneratingSuggestions(true);
+        try {
+          const suggestions = await generateLiveSuggestions(
+            config.topic,
+            config.difficulty,
+            transcriptions
+          );
+          if (suggestions.length > 0) {
+            setLiveSuggestions(suggestions);
+          }
+        } catch (e) {
+          console.error("Failed to get suggestions", e);
+        } finally {
+          setIsGeneratingSuggestions(false);
+        }
+      }, 1000); // 1秒防抖，避免频繁调用
+
+      return () => clearTimeout(timer);
+    }
+  }, [transcriptions, status, config.topic, config.difficulty]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -44,8 +81,6 @@ const App: React.FC = () => {
         audioContextRef.current.output?.resume();
       }
     };
-    
-    document.body.style.overscrollBehavior = 'none';
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
@@ -67,7 +102,9 @@ const App: React.FC = () => {
 
   const initiateSession = async (isRetry = false) => {
     try {
+      setErrorMessage(null);
       setStatus(isRetry ? AppStatus.RECONNECTING : AppStatus.CONNECTING);
+      
       const { inputContext, outputContext } = await startLiveSession({
         config,
         onTranscription: handleTranscription,
@@ -79,20 +116,16 @@ const App: React.FC = () => {
           }
         },
         onError: (err) => {
-          console.error("Session Error:", err);
+          setErrorMessage(err);
           handleAutoRetry();
         }
       });
+      
       audioContextRef.current = { input: inputContext, output: outputContext };
       setStatus(AppStatus.ACTIVE);
       setRetryCount(0);
     } catch (error) {
-      console.error("Failed to start session:", error);
-      if (isRetry) {
-        handleAutoRetry();
-      } else {
-        setStatus(AppStatus.ERROR);
-      }
+      if (!isRetry) setStatus(AppStatus.ERROR);
     }
   };
 
@@ -102,23 +135,21 @@ const App: React.FC = () => {
       setTimeout(() => initiateSession(true), 1500);
     } else {
       setStatus(AppStatus.ERROR);
-      alert("对话连接多次中断，请检查您的网络环境。");
     }
   };
 
   const handleStart = () => {
     setTranscriptions([]);
+    setLiveSuggestions([]);
     setRetryCount(0);
     initiateSession();
   };
 
   const handleStop = () => {
     setStatus(AppStatus.IDLE);
+    setErrorMessage(null);
+    setLiveSuggestions([]);
     stopLiveSession();
-  };
-
-  const handleCameraCapture = (base64: string) => {
-    sendImageFrame(base64);
   };
 
   return (
@@ -126,54 +157,39 @@ const App: React.FC = () => {
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-4 max-w-4xl flex flex-col gap-5 overflow-hidden">
-        <div className="flex bg-white/60 p-1.5 rounded-2xl border border-[#E8E2D6] self-center w-full max-w-sm shadow-sm">
-           <button 
-            onClick={() => setActiveMode(MainMode.PRACTICE)}
-            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMode === MainMode.PRACTICE ? 'bg-[#6B8E6B] text-white shadow-md' : 'text-[#8BA888]'}`}
-           >
-             口语练习
-           </button>
-           <button 
-            onClick={() => setActiveMode(MainMode.DICTIONARY)}
-            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMode === MainMode.DICTIONARY ? 'bg-[#6B8E6B] text-white shadow-md' : 'text-[#8BA888]'}`}
-           >
-             字典查询
-           </button>
-           <button 
-            onClick={() => setActiveMode(MainMode.HISTORY)}
-            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMode === MainMode.HISTORY ? 'bg-[#6B8E6B] text-white shadow-md' : 'text-[#8BA888]'}`}
-           >
-             复盘笔记
-           </button>
+        <div className="flex bg-white/60 p-1.5 rounded-2xl border border-[#E8E2D6] self-center w-full max-w-sm shadow-sm shrink-0">
+           {(Object.values(MainMode)).map(mode => (
+             <button 
+               key={mode}
+               onClick={() => setActiveMode(mode as MainMode)}
+               className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMode === mode ? 'bg-[#6B8E6B] text-white shadow-md' : 'text-[#8BA888]'}`}
+             >
+               {mode === MainMode.PRACTICE ? '口语练习' : mode === MainMode.DICTIONARY ? '字典查询' : '复盘笔记'}
+             </button>
+           ))}
         </div>
 
         {activeMode === MainMode.PRACTICE ? (
           <>
-            <div className="bg-[#FFFFFF]/80 backdrop-blur-sm rounded-[2.5rem] shadow-sm border border-[#E8E2D6] p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700">
-              <div className="absolute top-0 left-0 w-60 h-60 bg-[#6B8E6B]/5 rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl"></div>
-              
-              <Visualizer 
-                status={status} 
-                audioContext={audioContextRef.current.input} 
-              />
+            <div className={`bg-[#FFFFFF]/80 backdrop-blur-sm rounded-[2.5rem] shadow-sm border p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 shrink-0 ${status === AppStatus.ERROR ? 'border-red-200' : 'border-[#E8E2D6]'}`}>
+              <Visualizer status={status} audioContext={audioContextRef.current.input} />
               
               <div className="text-center mt-6 z-10">
                 <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
                   <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-bold border uppercase tracking-tight ${status === AppStatus.RECONNECTING ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-[#6B8E6B]/10 text-[#6B8E6B] border-[#6B8E6B]/20'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${status === AppStatus.RECONNECTING ? 'bg-orange-500' : 'bg-[#6B8E6B]'}`}></div>
-                    {status === AppStatus.RECONNECTING ? `自动重连中 (${retryCount}/${MAX_RETRIES})` : '无缝排队模式已启用'}
+                    {status === AppStatus.RECONNECTING ? `尝试重连 (${retryCount}/${MAX_RETRIES})` : '全球免梯直连'}
                   </span>
                 </div>
-                <h2 className="text-xl font-bold text-[#4A5D4A]">
+                <h2 className={`text-xl font-bold ${status === AppStatus.ERROR ? 'text-red-500' : 'text-[#4A5D4A]'}`}>
                   {status === AppStatus.IDLE && "准备好开口了吗？"}
-                  {status === AppStatus.CONNECTING && "正在接入免梯节点..."}
-                  {status === AppStatus.RECONNECTING && "连接抖动，修复中..."}
+                  {status === AppStatus.CONNECTING && "正在建立安全隧道..."}
+                  {status === AppStatus.RECONNECTING && "正在修复连接..."}
                   {status === AppStatus.ACTIVE && "精灵正在聆听并排队回答..."}
-                  {status === AppStatus.ERROR && "连接暂时中断"}
+                  {status === AppStatus.ERROR && "连接失败"}
                 </h2>
                 <p className="text-[#8BA888] mt-2 text-xs font-medium px-4">
-                  {status === AppStatus.IDLE && "我们的代理已为您打通网络，直接对话即可。"}
-                  {status === AppStatus.ACTIVE && "支持插话：Genie 会听完你说的话并随后回答。"}
+                  {errorMessage ? errorMessage : (status === AppStatus.IDLE ? "点击下方按钮开启对话，Genie 会根据您选择的话题进行引导。" : "Genie 正在实时为你提供回答建议，看下方的卡片。")}
                 </p>
               </div>
 
@@ -181,7 +197,6 @@ const App: React.FC = () => {
                 <button 
                   onClick={() => setIsCameraOpen(true)}
                   className="mt-8 z-20 w-16 h-16 bg-[#6B8E6B] text-white rounded-3xl flex items-center justify-center shadow-xl shadow-[#6B8E6B]/30 active:scale-90 transition-all duration-300"
-                  aria-label="拍照教学"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-7 h-7">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
@@ -191,18 +206,16 @@ const App: React.FC = () => {
               )}
             </div>
 
+            <TopicHelper 
+              topic={config.topic} 
+              voice={config.voice}
+              disabled={status === AppStatus.IDLE || status === AppStatus.ERROR}
+              dynamicSuggestions={liveSuggestions}
+              isGenerating={isGeneratingSuggestions}
+            />
+
             <div className="flex-1 flex flex-col min-h-0 bg-white/40 rounded-[2rem] border border-[#E8E2D6] overflow-hidden shadow-sm">
-              <div className="p-4 border-b border-[#E8E2D6] bg-white/50 flex items-center justify-between">
-                <h3 className="font-bold text-[#4A5D4A] flex items-center gap-2 text-sm">
-                  <span className="w-1.5 h-1.5 bg-[#6B8E6B] rounded-full"></span>
-                  实时流
-                </h3>
-              </div>
-              <TranscriptionView 
-                entries={transcriptions} 
-                showText={config.showTranscription}
-                voice={config.voice}
-              />
+              <TranscriptionView entries={transcriptions} showText={config.showTranscription} voice={config.voice} />
             </div>
           </>
         ) : activeMode === MainMode.DICTIONARY ? (
@@ -224,10 +237,7 @@ const App: React.FC = () => {
       )}
 
       {isCameraOpen && (
-        <CameraOverlay 
-          onCapture={handleCameraCapture} 
-          onClose={() => setIsCameraOpen(false)} 
-        />
+        <CameraOverlay onCapture={(b64) => sendImageFrame(b64)} onClose={() => setIsCameraOpen(false)} />
       )}
     </div>
   );
