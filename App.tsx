@@ -34,10 +34,11 @@ const App: React.FC = () => {
 
   const [dynamicSuggestions, setDynamicSuggestions] = useState<any[]>([]);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   const transcriptionsRef = useRef(transcriptions);
-  const lastSuggestionRef = useRef<number>(0); // 记录上次生成时间，防止过频
+  const lastSuggestionRef = useRef<number>(0);
   const reconnectCountRef = useRef(0);
 
   useEffect(() => { transcriptionsRef.current = transcriptions; }, [transcriptions]);
@@ -70,16 +71,16 @@ const App: React.FC = () => {
     setError(null);
     setTranscriptions([]);
     setDynamicSuggestions([]);
+    setSuggestionError(null);
     
     try {
       const contexts = await startLiveSession({
         config,
         onTranscription: handleTranscription,
         onClose: () => {
-          // 如果是异常中断，尝试重连
-          if (reconnectCountRef.current < 2) {
+          if (reconnectCountRef.current < 3) {
              setStatus(AppStatus.RECONNECTING);
-             setTimeout(handleStart, 2000);
+             setTimeout(handleStart, Math.pow(2, reconnectCountRef.current) * 1000);
              reconnectCountRef.current++;
           } else {
              setStatus(AppStatus.IDLE);
@@ -106,58 +107,50 @@ const App: React.FC = () => {
     setStatus(AppStatus.IDLE);
   };
 
-  // Add handleCapture to fix missing definition error in CameraOverlay usage
   const handleCapture = (base64: string) => {
     sendImageFrame(base64);
     setIsCameraOpen(false);
   };
 
-  const handleSaveHistory = () => {
-    if (transcriptions.length === 0) return;
-    const newHistory: SessionHistory = {
-      id: Date.now().toString(),
-      title: `${config.topic} - ${new Date().toLocaleDateString()}`,
-      date: new Date().toLocaleString(),
-      topic: config.topic,
-      entries: transcriptions
-    };
-    const saved = localStorage.getItem('fluent_genie_history');
-    const history = saved ? JSON.parse(saved) : [];
-    localStorage.setItem('fluent_genie_history', JSON.stringify([newHistory, ...history]));
-    alert("会话已保存！");
+  // 触发建议生成
+  const triggerSuggestions = async () => {
+    if (isGeneratingSuggestions) return;
+    
+    const currentLast = transcriptionsRef.current[transcriptionsRef.current.length - 1];
+    if (!currentLast || currentLast.role !== 'model') return;
+
+    setIsGeneratingSuggestions(true);
+    setSuggestionError(null);
+    lastSuggestionRef.current = Date.now();
+    
+    try {
+      const suggestions = await generateLiveSuggestions(
+        config.topic, 
+        config.difficulty, 
+        config.personality, 
+        transcriptionsRef.current
+      );
+      if (suggestions && suggestions.length > 0) {
+        setDynamicSuggestions(suggestions);
+      }
+    } catch (e: any) {
+      if (e.message === "QUOTA_LIMIT") {
+        setSuggestionError("API 配额超限，建议功能暂不可用");
+      }
+      console.error("Suggestions update error:", e);
+    } finally {
+      setIsGeneratingSuggestions(false);
+    }
   };
 
-  // 优化：实时助攻生成逻辑
   useEffect(() => {
     if (status === AppStatus.ACTIVE && transcriptions.length > 0) {
       const lastEntry = transcriptions[transcriptions.length - 1];
-      // 只有在模型说完话，且至少 800ms 没动静后触发
       if (lastEntry.role === 'model') {
-        const timer = setTimeout(async () => {
+        const timer = setTimeout(() => {
           const now = Date.now();
-          // 节流：至少间隔 4 秒才允许下一次生成，避免配额超限
-          if (now - lastSuggestionRef.current < 4000) return;
-
-          const currentLast = transcriptionsRef.current[transcriptionsRef.current.length - 1];
-          if (currentLast && currentLast.role === 'model' && !isGeneratingSuggestions) {
-            setIsGeneratingSuggestions(true);
-            lastSuggestionRef.current = now;
-            try {
-              const suggestions = await generateLiveSuggestions(
-                config.topic, 
-                config.difficulty, 
-                config.personality, 
-                transcriptionsRef.current
-              );
-              if (suggestions && suggestions.length > 0) {
-                setDynamicSuggestions(suggestions);
-              }
-            } catch (e) {
-              console.error("Suggestions update error:", e);
-            } finally {
-              setIsGeneratingSuggestions(false);
-            }
-          }
+          if (now - lastSuggestionRef.current < 5000) return;
+          triggerSuggestions();
         }, 800); 
         return () => clearTimeout(timer);
       }
@@ -220,7 +213,8 @@ const App: React.FC = () => {
                 <TopicHelper 
                   topic={config.topic} voice={config.voice} disabled={status === AppStatus.IDLE}
                   dynamicSuggestions={dynamicSuggestions} isGenerating={isGeneratingSuggestions}
-                  onManualRefresh={() => lastSuggestionRef.current = 0}
+                  error={suggestionError}
+                  onManualRefresh={triggerSuggestions}
                 />
               </div>
             </div>

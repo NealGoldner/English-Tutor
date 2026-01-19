@@ -9,6 +9,12 @@ let currentStream: MediaStream | null = null;
 let nextStartTime = 0;
 const sources = new Set<AudioBufferSourceNode>();
 
+// 自动检测运行环境，构建代理路径
+const getBaseUrl = () => {
+  const origin = window.location.origin;
+  return `${origin}/api`;
+};
+
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -66,20 +72,24 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     throw new Error(msg);
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Always use {apiKey: process.env.API_KEY} for GoogleGenAI initialization.
+  // Removed 'baseUrl' as it is not a recognized property in GoogleGenAIOptions.
+  const ai = new GoogleGenAI({ 
+    apiKey: process.env.API_KEY
+  });
   
   const personalityPrompts: Record<string, string> = {
-    '幽默达人': "你是一个及其幽默的导师。每一句英文回复后必须紧跟中文翻译。",
-    '电影编剧': "你是一个编剧。每一句英文回复后必须紧跟中文翻译。",
-    '严厉教官': "你是一个严厉的英语教官。每一句英文回复后必须紧跟中文翻译。"
+    '幽默达人': "你是一个极具幽默感的英语导师，说话风趣。每一句英文回复后必须紧跟中文翻译。",
+    '电影编剧': "你是一个电影编剧，喜欢用戏剧化的场景练习。每一句英文回复后必须紧跟中文翻译。",
+    '严厉教官': "你是一个极其严格的英语教官，注重纠错。每一句英文回复后必须紧跟中文翻译。"
   };
 
   const systemInstruction = `
     Identity: FluentGenie (${personalityPrompts[config.personality || '幽默达人']})
-    Task: Interactive English Practice. Topic: "${config.topic}". Level: ${config.difficulty}.
-    Rules: 
-    1. ALWAYS provide Chinese translation after English sentences. 
-    2. Be interactive, ask deep questions.
+    Current Topic: "${config.topic}". Level: ${config.difficulty}.
+    Mandatory Rules: 
+    1. ALWAYS provide Chinese translation after every English sentence.
+    2. Respond briefly but engage the user with deep questions.
   `.trim();
 
   try {
@@ -87,7 +97,7 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks: {
         onopen: () => {
-          console.log("Session Opened");
+          console.log("Gemini Live Session Opened");
           const source = inputAudioContext!.createMediaStreamSource(currentStream!);
           const scriptProcessor = inputAudioContext!.createScriptProcessor(4096, 1, 1);
           scriptProcessor.onaudioprocess = (e) => {
@@ -123,12 +133,17 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
           }
         },
         onerror: (e: any) => {
-          console.error("Session Error:", e);
-          onError(e.message?.includes('quota') ? "API 配额用尽" : "网络连接不稳定");
+          console.error("Session Socket Error:", e);
+          const msg = e.message?.toLowerCase();
+          if (msg?.includes('quota') || msg?.includes('429')) {
+            onError("API 配额超限（429）。请检查 Google AI Studio 账单或稍后再试。");
+          } else {
+            onError("网络环境不稳定，正在尝试恢复...");
+          }
         },
         onclose: (e: any) => {
-          console.log("Session Closed", e);
-          onClose(); // 通知 App 进行重连或重置
+          console.log("Session Socket Closed", e);
+          onClose();
         }
       },
       config: {
@@ -143,7 +158,8 @@ export const startLiveSession = async ({ config, onTranscription, onClose, onErr
     currentSession = await sessionPromise;
     return { inputContext: inputAudioContext, outputContext: outputAudioContext };
   } catch (err: any) {
-    onError(err.message);
+    console.error("Session Connect Exception:", err);
+    onError(err.message || "无法连接到服务器，请检查网络设置。");
     throw err;
   }
 };
